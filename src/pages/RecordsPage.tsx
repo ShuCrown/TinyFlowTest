@@ -1,10 +1,11 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   CheckCircle2,
   FileText,
   Layers,
   ListOrdered,
+  Mic,
   Pencil,
   Plus,
   Trash2,
@@ -69,6 +70,11 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function isTargetUrl(value: string): boolean {
+  const clean = value.trim();
+  return clean.startsWith("/") || isHttpUrl(clean);
+}
+
 function RecordDialog({
   record,
   systems,
@@ -100,8 +106,8 @@ function RecordDialog({
       setError("请填写记录名称。");
       return;
     }
-    if (!isHttpUrl(targetUrl.trim())) {
-      setError("目标地址需要是完整的 http(s) 地址。");
+    if (!isTargetUrl(targetUrl.trim())) {
+      setError("目标地址需要是完整的 http(s) 地址，或以 / 开头的同源路径。");
       return;
     }
     setError("");
@@ -184,6 +190,10 @@ function RecordDialog({
                 placeholder="http://dev.example.com/dashboard"
                 spellCheck={false}
               />
+              <p className="text-[11px] leading-4 text-muted">
+                可使用同源路径（如 <span className="font-mono">/tf/demo/customers.html</span>）
+                直接录制；跨域系统需与开发期代理目标一致。
+              </p>
             </div>
 
             <div className="grid gap-1.5">
@@ -268,6 +278,7 @@ const EMPTY_STEPS: Array<[string, string, string]> = [
 ];
 
 export function RecordsPage() {
+  const navigate = useNavigate();
   const [records, setRecords] = useState<OperationRecord[]>(() => listRecords());
   const [systems] = useState<TargetSystem[]>(() => listSystems());
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -296,6 +307,7 @@ export function RecordsPage() {
 
   const handleSave = (draft: RecordDraft): void => {
     const now = new Date().toISOString();
+    const wasEditing = Boolean(editing);
     const next: OperationRecord = editing
       ? { ...editing, ...draft, updatedAt: now }
       : {
@@ -311,6 +323,7 @@ export function RecordsPage() {
     setRecords(listRecords());
     setEditing(null);
     setDialogOpen(false);
+    if (!wasEditing) navigate(`/records/${next.id}/record`);
   };
 
   const confirmDelete = (): void => {
@@ -327,7 +340,8 @@ export function RecordsPage() {
         title="操作记录"
         description={
           <>
-            一次录制 = 一条记录，保存录制 JSON、转换后的 DSL 与回放微调值。系统地址请在
+            一次录制 = 一条记录：打开目标系统，在目标页完成表单填写、下拉选择等操作，停止后自动生成节点并保存。
+            系统地址请在
             <Link className="ml-1 text-accent underline underline-offset-2" to="/systems">
               系统管理
             </Link>
@@ -360,14 +374,14 @@ export function RecordsPage() {
         <StatCard
           label="NODES"
           value={totalNodes}
-          hint="可回放节点总数"
+          hint="转换后的节点总数"
           icon={Layers}
           tone="moss"
         />
         <StatCard
           label="READY"
           value={readyCount}
-          hint="已完成转换的记录"
+          hint="已保存录制结果的记录"
           icon={CheckCircle2}
           tone="amber"
         />
@@ -381,7 +395,7 @@ export function RecordsPage() {
             </div>
             <h2 className="mt-4 text-[15px] font-semibold tracking-tight">还没有操作记录</h2>
             <p className="mt-1.5 max-w-[520px] text-[12.5px] leading-5 text-muted">
-              先建立一条记录，后续在录制工作台里捕获点击、输入、下拉与页面跳转。
+              先建立一条记录，随后在录制工作台里打开目标系统，捕获点击、输入、下拉与页面跳转。
             </p>
             <Button className="mt-5" onClick={openCreate}>
               <Plus />
@@ -447,7 +461,7 @@ export function RecordsPage() {
                     <TableCell className="font-mono text-[12px]">{record.nodes}</TableCell>
                     <TableCell>
                       <Badge variant={record.status === "ready" ? "moss" : "amber"}>
-                        {record.status === "ready" ? "可回放" : "待录制"}
+                        {record.status === "ready" ? "已录制" : "待录制"}
                       </Badge>
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-[12px] text-muted">
@@ -455,6 +469,14 @@ export function RecordsPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/records/${record.id}/record`)}
+                        >
+                          <Mic className="size-3.5" />
+                          录制
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon-sm"

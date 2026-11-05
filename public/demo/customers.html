@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>客户列表 · TinyFlow 回放目标</title>
+    <style>
+      :root {
+        color: #1f2937;
+        font-family: "Inter", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+        font-size: 14px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      body {
+        margin: 0;
+        background: #f6f7f9;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 16px 20px;
+        border-bottom: 1px solid #e5e7eb;
+        background: #fff;
+      }
+      header h1 {
+        flex: 1;
+        margin: 0;
+        font-size: 17px;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+      button {
+        padding: 7px 14px;
+        border: 1px solid #cbd5e1;
+        border-radius: 7px;
+        background: #fff;
+        cursor: pointer;
+      }
+      button.primary {
+        border-color: #2563eb;
+        background: #2563eb;
+        color: #fff;
+      }
+      .action-result {
+        color: #64748b;
+        font-size: 12px;
+      }
+      .dropdown {
+        position: relative;
+      }
+      .dropdown-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        right: 0;
+        z-index: 30;
+        min-width: 128px;
+        padding: 4px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+      }
+      .dropdown-menu button {
+        display: block;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        text-align: left;
+      }
+      .dropdown-menu button:hover {
+        background: #f1f5f9;
+      }
+      table {
+        width: 100%;
+        overflow: hidden;
+        border-collapse: collapse;
+        border-radius: 9px;
+        background: #fff;
+        box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+      }
+      th,
+      td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #eef2f7;
+        text-align: left;
+        font-size: 13px;
+      }
+      th {
+        background: #f1f5f9;
+        font-weight: 600;
+      }
+      .summary {
+        margin: 0 0 12px;
+        color: #64748b;
+        font-size: 12.5px;
+      }
+      .overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 23, 42, 0.45);
+      }
+      [role="dialog"] {
+        width: min(420px, calc(100vw - 32px));
+        padding: 20px;
+        border: 1px solid #cbd5e1;
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 24px 48px rgba(15, 23, 42, 0.24);
+      }
+      [role="dialog"] h2 {
+        margin: 0 0 14px;
+        font-size: 16px;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 13px;
+      }
+      .field label {
+        color: #475569;
+        font-size: 12.5px;
+      }
+      .field input,
+      .field select {
+        padding: 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 7px;
+      }
+      .row-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      #toast {
+        position: fixed;
+        top: 14px;
+        right: 14px;
+        z-index: 50;
+        padding: 10px 15px;
+        border-radius: 8px;
+        background: #065f46;
+        color: #fff;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+      #toast.show {
+        opacity: 1;
+      }
+      #toast.error {
+        background: #991b1b;
+      }
+      .saved-banner {
+        margin: 0 0 12px;
+        padding: 9px 12px;
+        border: 1px solid #86efac;
+        border-radius: 8px;
+        background: #f0fdf4;
+        color: #166534;
+        font-size: 12.5px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>客户列表</h1>
+      <span id="action-result" class="action-result" data-testid="action-result">未选择操作</span>
+      <div class="dropdown">
+        <button
+          id="row-actions-trigger"
+          data-testid="row-action-trigger"
+          type="button"
+          aria-haspopup="menu"
+        >
+          更多操作
+        </button>
+        <div id="action-menu" class="dropdown-menu" role="menu" hidden>
+          <button id="action-edit" data-testid="action-edit" role="menuitem" type="button">
+            编辑
+          </button>
+          <button id="action-delete" data-testid="action-delete" role="menuitem" type="button">
+            删除
+          </button>
+        </div>
+      </div>
+      <button id="new-customer" data-testid="customer-new" type="button">新建客户</button>
+    </header>
+
+    <main>
+      <div id="toast" role="status" aria-live="polite"></div>
+      <div id="saved-banner" class="saved-banner" data-testid="saved-banner" hidden>
+        保存成功，列表已刷新。
+      </div>
+      <p class="summary" id="summary">共 2 条</p>
+
+      <table aria-label="客户表">
+        <thead>
+          <tr>
+            <th>客户名称</th>
+            <th>所属区域</th>
+            <th>备注</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr data-testid="customer-row" data-id="1">
+            <td>华东示例客户</td>
+            <td>华东区</td>
+            <td>录制的初始数据</td>
+          </tr>
+          <tr data-testid="customer-row" data-id="2">
+            <td>华南示例客户</td>
+            <td>华南区</td>
+            <td>录制的初始数据</td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+
+    <div id="new-overlay" class="overlay" hidden>
+      <div role="dialog" aria-label="新建客户" aria-modal="true">
+        <h2>新建客户</h2>
+        <div class="field">
+          <label for="customer-name">客户名称</label>
+          <input id="customer-name" name="customerName" data-testid="customer-name" />
+        </div>
+        <div class="field">
+          <label for="customer-region">所属区域</label>
+          <select id="customer-region" name="region">
+            <option value="">请选择</option>
+            <option value="华东区">华东区</option>
+            <option value="华南区">华南区</option>
+            <option value="华北区">华北区</option>
+            <option value="西南区">西南区</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="remark">备注</label>
+          <input id="remark" name="remark" />
+        </div>
+        <div class="row-actions">
+          <button id="new-cancel" type="button">取消</button>
+          <button id="new-save" class="primary" data-testid="customer-save" type="button">
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const DRAFT_KEY = "tinyflow:customer-draft";
+      const rows = document.getElementById("rows");
+      const summary = document.getElementById("summary");
+      const overlay = document.getElementById("new-overlay");
+      const nameInput = document.getElementById("customer-name");
+      const regionSelect = document.getElementById("customer-region");
+      const remarkInput = document.getElementById("remark");
+      const toast = document.getElementById("toast");
+      const actionTrigger = document.getElementById("row-actions-trigger");
+      const actionMenu = document.getElementById("action-menu");
+      const actionResult = document.getElementById("action-result");
+      let menuCloseTimer;
+
+      function showToast(message, isError) {
+        toast.textContent = message;
+        toast.classList.toggle("error", Boolean(isError));
+        toast.classList.add("show");
+        clearTimeout(window.__toastTimer);
+        window.__toastTimer = setTimeout(() => toast.classList.remove("show"), 2500);
+      }
+
+      function refreshSummary() {
+        summary.textContent = "共 " + rows.querySelectorAll("tr[data-testid=customer-row]").length + " 条";
+      }
+
+      function appendRow(customer) {
+        const row = document.createElement("tr");
+        row.dataset.testid = "customer-row";
+        row.dataset.id = String(Date.now());
+        for (const value of [customer.name, customer.region || "未选择", customer.remark || "—"]) {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.append(cell);
+        }
+        rows.prepend(row);
+        refreshSummary();
+      }
+
+      document.getElementById("new-customer").addEventListener("click", () => {
+        overlay.hidden = false;
+        nameInput.focus();
+      });
+
+      // 模拟 antd Dropdown 的悬浮触发：只有 mouseenter 才展开，验证回放会补齐 hover 事件。
+      function openActionMenu() {
+        clearTimeout(menuCloseTimer);
+        actionMenu.hidden = false;
+      }
+
+      function closeActionMenuSoon() {
+        clearTimeout(menuCloseTimer);
+        menuCloseTimer = setTimeout(() => {
+          actionMenu.hidden = true;
+        }, 300);
+      }
+
+      actionTrigger.addEventListener("mouseenter", openActionMenu);
+      actionTrigger.addEventListener("mouseleave", closeActionMenuSoon);
+      actionMenu.addEventListener("mouseenter", () => clearTimeout(menuCloseTimer));
+      actionMenu.addEventListener("mouseleave", closeActionMenuSoon);
+
+      document.getElementById("action-edit").addEventListener("click", () => {
+        actionResult.textContent = "已选择：编辑";
+        actionMenu.hidden = true;
+      });
+
+      document.getElementById("action-delete").addEventListener("click", () => {
+        actionResult.textContent = "已选择：删除";
+        actionMenu.hidden = true;
+      });
+
+      document.getElementById("new-cancel").addEventListener("click", () => {
+        overlay.hidden = true;
+      });
+
+      document.getElementById("new-save").addEventListener("click", () => {
+        const name = nameInput.value.trim();
+        if (!name) {
+          showToast("请填写客户名称", true);
+          return;
+        }
+        sessionStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify({ name, region: regionSelect.value, remark: remarkInput.value.trim() }),
+        );
+        location.href = "?saved=1";
+      });
+
+      const params = new URLSearchParams(location.search);
+      if (params.get("saved") === "1") {
+        const draft = sessionStorage.getItem(DRAFT_KEY);
+        sessionStorage.removeItem(DRAFT_KEY);
+        if (draft) {
+          try {
+            appendRow(JSON.parse(draft));
+          } catch {
+            // 草稿损坏时只保留初始列表
+          }
+        }
+        document.getElementById("saved-banner").hidden = false;
+        showToast("保存成功");
+      }
+
+      refreshSummary();
+    </script>
+  </body>
+</html>

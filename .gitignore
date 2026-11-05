@@ -3,3 +3,4 @@ dist
 *.local
 .env.local
 .DS_Store
+.trae-html-share-packages

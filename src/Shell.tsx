@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 const NAV = [
   { to: "/systems", label: "系统管理", code: "SYS" },
@@ -6,7 +6,12 @@ const NAV = [
   { to: "/flows", label: "流程", code: "FLW" },
 ];
 
+const WORKBENCH_PATH = /^\/records\/[^/]+\/record\/?$/;
+
 export function Shell() {
+  const { pathname } = useLocation();
+  const isWorkbench = WORKBENCH_PATH.test(pathname);
+
   return (
     <div className="flex min-h-screen">
       <aside className="sticky top-0 flex h-screen w-[78px] shrink-0 flex-col border-r border-line bg-panel/80 backdrop-blur md:w-[86px]">
@@ -50,7 +55,7 @@ export function Shell() {
       </aside>
 
       <main className="min-w-0 flex-1 px-4 py-6 md:px-8 lg:px-10">
-        <div className="mx-auto w-full max-w-[1180px]">
+        <div className={`w-full ${isWorkbench ? "" : "mx-auto max-w-[1180px]"}`}>
           <Outlet />
         </div>
       </main>

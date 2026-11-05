@@ -1,0 +1,941 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  CheckCircle2,
+  Loader2,
+  Mic,
+  Play,
+  RefreshCw,
+  Save,
+  Square,
+  TriangleAlert,
+  Video,
+} from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { getRecord, getSystemToken, listSystems, saveRecord, saveSystemToken } from "@/lib/store";
+import {
+  describeTargetFailure,
+  loadProxyConfig,
+  resolveTargetUrl,
+  type ProxyConfig,
+} from "@/lib/proxy";
+import type { FlowNode } from "@/dsl/index.ts";
+import { DomRecorder } from "@/recorder/dom-recorder.ts";
+import {
+  importChromeRecorder,
+  parseSelectorGroups,
+  type ChromeRecorderRecording,
+  type ChromeRecorderStep,
+  type RecordingImportResult,
+} from "@/recorder/chrome-recorder.ts";
+import {
+  createIframeHost,
+  runFlow,
+  type ReplayEvent,
+  type ReplayNodeStatus,
+} from "@/replay/index.ts";
+import type { OperationRecord } from "@/lib/types";
+
+type Phase = "idle" | "opening" | "login" | "recording" | "finished" | "empty" | "failed" | "saved";
+
+type RunStatus = "running" | ReplayNodeStatus;
+
+interface RunItem {
+  nodeId: string;
+  index: number;
+  name?: string;
+  status: RunStatus;
+  message: string;
+  durationMs?: number;
+  strategy?: string;
+}
+
+const PHASE_BADGE: Record<Phase, { label: string; variant: "secondary" | "accent" | "moss" | "amber" | "destructive" }> = {
+  idle: { label: "待录制", variant: "secondary" },
+  opening: { label: "加载中", variant: "accent" },
+  login: { label: "需要登录", variant: "amber" },
+  recording: { label: "录制中", variant: "destructive" },
+  finished: { label: "待保存", variant: "accent" },
+  empty: { label: "未捕获", variant: "amber" },
+  failed: { label: "失败", variant: "destructive" },
+  saved: { label: "已保存", variant: "moss" },
+};
+
+const PHASE_BOX: Record<Phase, string> = {
+  idle: "border-line bg-white text-muted",
+  opening: "border-accent/20 bg-accent-soft text-accent",
+  login: "border-amber/20 bg-amber-soft text-amber",
+  recording: "border-danger/20 bg-[#fdf3f0] text-danger",
+  finished: "border-accent/20 bg-accent-soft text-accent",
+  empty: "border-amber/20 bg-amber-soft text-amber",
+  failed: "border-danger/20 bg-[#fdf3f0] text-danger",
+  saved: "border-moss/20 bg-moss-soft text-moss",
+};
+
+const RECORD_TYPE_LABEL: Record<string, string> = {
+  navigate: "导航",
+  click: "点击",
+  doubleClick: "双击",
+  change: "输入",
+  hover: "悬停",
+  keydown: "按键",
+};
+
+const NODE_TYPE_LABEL: Record<FlowNode["type"], string> = {
+  navigate: "导航",
+  interact: "交互",
+  picker: "选择器",
+  wait: "等待",
+};
+
+const RUN_BADGE: Record<
+  RunStatus,
+  { label: string; variant: "secondary" | "moss" | "amber" | "destructive" }
+> = {
+  running: { label: "执行中", variant: "secondary" },
+  pass: { label: "通过", variant: "moss" },
+  healed: { label: "自愈", variant: "amber" },
+  fail: { label: "失败", variant: "destructive" },
+  skipped: { label: "跳过", variant: "secondary" },
+};
+
+function recordedStepLabel(step: ChromeRecorderStep): string {
+  if (step.labelText) return step.labelText;
+  if (step.type === "navigate") return step.url ?? "导航";
+  if (step.type === "change") {
+    const value = step.value === undefined ? "" : ` = ${JSON.stringify(step.value)}`;
+    return `${step.tagName ?? "change"}${value}`;
+  }
+  if (step.type === "keydown") return `按键 ${step.key ?? ""}`;
+  const tokens = parseSelectorGroups(step.selectors);
+  return tokens.aria ?? tokens.text ?? tokens.css ?? tokens.xpath ?? "(未定位)";
+}
+
+function nodeLabel(node: FlowNode): string {
+  if (node.type === "navigate") return node.url;
+  if (node.type === "picker") return node.name ?? node.trigger.label ?? "复合选择";
+  if (node.type === "interact") return node.name ?? node.target.label ?? node.adapter;
+  return node.name ?? node.id;
+}
+
+function injectSystemToken(doc: Document, raw: string): void {
+  const clean = raw.trim().replace(/^bearer /i, "");
+  if (!clean) return;
+  try {
+    const storage = doc.defaultView?.localStorage;
+    if (!storage) return;
+    storage.setItem("token", clean);
+    storage.setItem("access_token", clean);
+    storage.setItem("Authorization", clean);
+    try {
+      const user = JSON.parse(storage.getItem("UserInfo") ?? "{}") as Record<string, unknown>;
+      storage.setItem("UserInfo", JSON.stringify({ ...user, token: clean }));
+    } catch {
+      storage.setItem("UserInfo", JSON.stringify({ token: clean }));
+    }
+  } catch {
+    // 目标页跨域时 storage 不可写，交给后续 loadFrame 的同源校验报错。
+  }
+}
+
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-line bg-white px-2 py-1.5 text-center">
+      <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted">{label}</div>
+      <div className="mt-0.5 font-mono text-[14px] font-semibold leading-none">{value}</div>
+    </div>
+  );
+}
+
+export function RecordWorkbenchPage() {
+  const { recordId } = useParams<{ recordId: string }>();
+  const navigate = useNavigate();
+  const record = useMemo<OperationRecord | undefined>(
+    () => (recordId ? getRecord(recordId) : undefined),
+    [recordId],
+  );
+  const systems = useMemo(() => listSystems(), []);
+  const systemName = record?.systemId
+    ? (systems.find((system) => system.id === record.systemId)?.name ?? "系统已删除")
+    : "未绑定系统";
+
+  const [name, setName] = useState(record?.name ?? "");
+  const [targetUrl, setTargetUrl] = useState(record?.targetUrl ?? "");
+  const [token, setToken] = useState(() =>
+    record?.systemId ? getSystemToken(record.systemId) : "",
+  );
+  const [steps, setSteps] = useState<ChromeRecorderStep[]>(record?.recording?.steps ?? []);
+  const [result, setResult] = useState<RecordingImportResult | null>(
+    record?.dsl && record.report ? { dsl: record.dsl, report: record.report } : null,
+  );
+  const [phase, setPhase] = useState<Phase>(record?.dsl ? "saved" : "idle");
+  const [statusText, setStatusText] = useState(
+    record?.dsl
+      ? "已载入上次录制结果，可查看节点或清空后重新录制。"
+      : "点「打开系统」加载目标页，或直接点「开始录制」。",
+  );
+  const [recording, setRecording] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [frameLoaded, setFrameLoaded] = useState(false);
+  const [frameUrl, setFrameUrl] = useState("");
+  const [proxyConfig, setProxyConfig] = useState<ProxyConfig | null>(null);
+  const [proxyError, setProxyError] = useState("");
+  const [replaying, setReplaying] = useState(false);
+  const [runItems, setRunItems] = useState<RunItem[]>([]);
+  const [replayText, setReplayText] = useState(
+    record?.dsl
+      ? "已载入上次录制，可点「开始回放」重走一遍。"
+      : "生成节点后可在右侧目标系统回放校验。",
+  );
+
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const recorderRef = useRef<DomRecorder | null>(null);
+
+  const getRecorder = (): DomRecorder => {
+    if (!recorderRef.current) {
+      recorderRef.current = new DomRecorder({
+        onChange: (next) => setSteps(next),
+      });
+    }
+    return recorderRef.current;
+  };
+
+  useEffect(() => {
+    let alive = true;
+    loadProxyConfig()
+      .then((config) => {
+        if (alive) setProxyConfig(config);
+      })
+      .catch((error: unknown) => {
+        if (alive) setProxyError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      alive = false;
+      recorderRef.current?.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    const frame = iframeRef.current;
+    if (!frame || !recording) return;
+
+    const handleLoad = (): void => {
+      const doc = frame.contentDocument;
+      if (!doc) {
+        setPhase("failed");
+        setStatusText("目标页跳出了同源范围，录制无法读取 DOM。请改用同源代理地址。");
+        return;
+      }
+      const recorder = getRecorder();
+      recorder.attach(doc);
+      try {
+        const url = frame.contentWindow?.location.href ?? "";
+        if (url) {
+          recorder.recordNavigation(url);
+          setFrameUrl(url);
+        }
+      } catch {
+        // contentWindow 不可读时由上面的错误分支处理。
+      }
+      setFrameLoaded(true);
+    };
+
+    frame.addEventListener("load", handleLoad);
+    return () => frame.removeEventListener("load", handleLoad);
+  }, [recording]);
+
+  if (!record) {
+    return (
+      <Card className="mt-8 items-center px-6 py-12 text-center">
+        <h1 className="text-[16px] font-semibold">记录不存在</h1>
+        <p className="mt-1 text-[12.5px] text-muted">可能已被删除，返回记录列表重新选择。</p>
+        <Button className="mt-5" onClick={() => navigate("/records")}>
+          返回记录列表
+        </Button>
+      </Card>
+    );
+  }
+
+  const loadFrame = (source: string): Promise<Document> => {
+    const frame = iframeRef.current;
+    if (!frame) return Promise.reject(new Error("目标容器尚未就绪"));
+    return new Promise<Document>((resolve, reject) => {
+      let settled = false;
+      let timer = 0;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        frame.removeEventListener("load", onLoad);
+        callback();
+      };
+      const onLoad = (): void => {
+        const doc = frame.contentDocument;
+        if (!doc) {
+          finish(() =>
+            reject(new Error("目标页与当前页面不同源，无法读取 DOM。请配置同源代理。")),
+          );
+          return;
+        }
+        finish(() => resolve(doc));
+      };
+      timer = window.setTimeout(() => {
+        finish(() => reject(new Error("目标页加载超时（20s）。")));
+      }, 20000);
+      frame.addEventListener("load", onLoad);
+      frame.src = source;
+    });
+  };
+
+  const convert = (captured: ChromeRecorderStep[]): void => {
+    try {
+      const converted = importChromeRecorder({
+        recording: { title: name.trim() || record.name, steps: captured },
+        system: {
+          id: record.systemId || "local",
+          name: systemName,
+          baseUrl: window.location.origin,
+        },
+        flowName: name.trim() || record.name,
+      });
+      setResult(converted);
+      setPhase("finished");
+      setStatusText(
+        `录制完成 · ${captured.length} 步 → ${converted.dsl.nodes.length} 个节点`,
+      );
+      setRunItems([]);
+      setReplayText("节点已生成，可点「开始回放」校验录制结果。");
+    } catch (error) {
+      setResult(null);
+      setPhase("failed");
+      setStatusText(`转换失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const stopRecording = (): void => {
+    const recorder = recorderRef.current;
+    const captured = recorder ? recorder.stop() : [];
+    setRecording(false);
+    setSteps(captured);
+    if (captured.length === 0) {
+      setPhase("empty");
+      setStatusText("没有捕获到可转换的操作，请在目标页完成一次表单操作后重试。");
+      return;
+    }
+    convert(captured);
+  };
+
+  const prepareTarget = async (): Promise<Document> => {
+    let config = proxyConfig;
+    if (!config && !proxyError) {
+      try {
+        config = await loadProxyConfig();
+        setProxyConfig(config);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setProxyError(message);
+        throw new Error(describeTargetFailure(null, message));
+      }
+    }
+    const resolved = resolveTargetUrl(targetUrl, config);
+    if (!resolved) {
+      throw new Error(describeTargetFailure(config, proxyError));
+    }
+    let doc = await loadFrame(resolved.url.toString());
+    if (resolved.viaProxy && token.trim()) {
+      injectSystemToken(doc, token);
+      doc = await loadFrame(resolved.url.toString());
+    }
+    setFrameLoaded(true);
+    return doc;
+  };
+
+  const openSystem = async (): Promise<void> => {
+    if (busy || recording || replaying) return;
+    setBusy(true);
+    setPhase("opening");
+    setStatusText("正在加载目标系统…");
+    setFrameLoaded(false);
+    try {
+      const doc = await prepareTarget();
+      try {
+        setFrameUrl(iframeRef.current?.contentWindow?.location.href ?? "");
+      } catch {
+        setFrameUrl("");
+      }
+      if (doc.querySelector('input[type="password"]')) {
+        setPhase("login");
+        setStatusText("已打开登录页：请在右侧完成登录，再点「开始录制」。");
+      } else {
+        setPhase("idle");
+        setStatusText("目标系统已打开，可点「开始录制」。");
+      }
+      if (record.systemId) saveSystemToken(record.systemId, token);
+    } catch (error) {
+      setPhase("failed");
+      setStatusText(`打开目标系统失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startRecording = async (): Promise<void> => {
+    if (busy || recording || replaying) return;
+    setBusy(true);
+    setResult(null);
+    setSteps([]);
+    setRunItems([]);
+    setReplayText("生成节点后可在右侧目标系统回放校验。");
+    setPhase("opening");
+    setStatusText("正在加载目标系统…");
+    setFrameLoaded(false);
+    try {
+      const doc = await prepareTarget();
+      if (doc.querySelector('input[type="password"]')) {
+        setPhase("login");
+        setStatusText("检测到登录页：请先在右侧完成登录，然后重新点「开始录制」。");
+        return;
+      }
+      const recorder = getRecorder();
+      recorder.start();
+      recorder.attach(doc);
+      try {
+        const url = iframeRef.current?.contentWindow?.location.href ?? "";
+        if (url) {
+          recorder.recordNavigation(url);
+          setFrameUrl(url);
+        }
+      } catch {
+        setFrameUrl("");
+      }
+      setRecording(true);
+      setPhase("recording");
+      setStatusText("录制中 · 在右侧目标页操作，完成后点「停止并生成」。");
+      if (record.systemId) saveSystemToken(record.systemId, token);
+    } catch (error) {
+      setPhase("failed");
+      setStatusText(`打开目标系统失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetRecording = (): void => {
+    if (replaying) return;
+    if (recording) {
+      recorderRef.current?.stop();
+      setRecording(false);
+    }
+    setSteps([]);
+    setResult(null);
+    setRunItems([]);
+    setReplayText("生成节点后可在右侧目标系统回放校验。");
+    setPhase("idle");
+    setStatusText("已清空本次录制，点「开始录制」重新捕获操作。");
+    setFrameLoaded(Boolean(iframeRef.current?.contentDocument));
+  };
+
+  const save = (): void => {
+    if (!result || steps.length === 0 || recording || replaying) return;
+    const now = new Date().toISOString();
+    const cleanName = name.trim() || record.name;
+    const recordingJson: ChromeRecorderRecording = { title: cleanName, steps };
+    const next: OperationRecord = {
+      ...record,
+      name: cleanName,
+      targetUrl: targetUrl.trim() || record.targetUrl,
+      recording: recordingJson,
+      dsl: result.dsl,
+      report: result.report,
+      steps: steps.length,
+      nodes: result.dsl.nodes.length,
+      status: "ready",
+      updatedAt: now,
+    };
+    try {
+      saveRecord(next);
+      if (record.systemId) saveSystemToken(record.systemId, token);
+      setName(cleanName);
+      setPhase("saved");
+      setStatusText(`已保存「${cleanName}」· ${steps.length} 步 / ${result.dsl.nodes.length} 节点`);
+    } catch (error) {
+      setPhase("failed");
+      setStatusText(
+        `保存失败：${error instanceof Error ? error.message : String(error)}（localStorage 可能已满）`,
+      );
+    }
+  };
+
+  const replay = async (): Promise<void> => {
+    const frame = iframeRef.current;
+    if (!frame || !result || recording || replaying || busy) return;
+    setReplaying(true);
+    setRunItems([]);
+    setReplayText("回放中 · 准备导航…");
+    setFrameLoaded(true);
+    if (token.trim()) {
+      try {
+        const doc = frame.contentDocument;
+        if (doc) injectSystemToken(doc, token);
+        if (record.systemId) saveSystemToken(record.systemId, token);
+      } catch {
+        // 目标跨域时无法注入，回放会在定位节点上给出明确失败信息。
+      }
+    }
+    const host = createIframeHost(frame);
+    try {
+      const dsl = {
+        ...result.dsl,
+        systems: result.dsl.systems.map((system) => ({
+          ...system,
+          baseUrl: window.location.origin,
+        })),
+      };
+      await runFlow({
+        dsl,
+        host,
+        onEvent: (event: ReplayEvent) => {
+          if (event.type === "run.started") {
+            setReplayText(`回放中 · 0/${event.totalNodes} 节点`);
+            return;
+          }
+          if (event.type === "node.started") {
+            setRunItems((items) => [
+              ...items,
+              {
+                nodeId: event.nodeId,
+                index: event.index,
+                name: event.name,
+                status: "running",
+                message: "执行中…",
+              },
+            ]);
+            return;
+          }
+          if (event.type === "node.finished") {
+            const node = event.node;
+            setRunItems((items) =>
+              items.map((item) =>
+                item.nodeId === node.nodeId
+                  ? {
+                      ...item,
+                      status: node.status,
+                      message: node.message,
+                      durationMs: node.durationMs,
+                      strategy: node.strategy,
+                    }
+                  : item,
+              ),
+            );
+            return;
+          }
+          const seconds = (event.durationMs / 1000).toFixed(1);
+          setReplayText(
+            event.status === "finished"
+              ? `完成 · ${event.passed}/${event.total} 节点通过 · ${seconds}s`
+              : `${event.status === "canceled" ? "已取消" : "失败"} · ${event.error ?? "未知错误"}`,
+          );
+        },
+      });
+      try {
+        setFrameUrl(iframeRef.current?.contentWindow?.location.href ?? frameUrl);
+      } catch {
+        // 回放后跳出同源时保留上一次地址。
+      }
+    } catch (error) {
+      setReplayText(`回放失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      host.dispose();
+      setReplaying(false);
+    }
+  };
+
+  const frameBadge = replaying ? "回放中" : recording ? "录制中" : frameLoaded ? "已加载" : "未加载";
+  const phaseBadge = PHASE_BADGE[phase];
+  const needsConfirm = result?.report.needsConfirm ?? 0;
+
+  return (
+    <div className="pb-10">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
+        <div className="flex min-w-0 items-start gap-3">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="返回记录列表"
+            title="返回记录列表"
+            onClick={() => navigate("/records")}
+          >
+            <ArrowLeft />
+          </Button>
+          <div className="min-w-0">
+            <span className="tf-kicker">REC / WORKBENCH</span>
+            <h1 className="tf-display mt-1 truncate text-[26px] leading-tight">
+              {name.trim() || record.name}
+            </h1>
+            <p className="mt-1 truncate text-[12.5px] text-muted">
+              {systemName} · <span className="font-mono text-[11.5px]">{targetUrl || "未设置目标地址"}</span>
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={phaseBadge.variant}>{phaseBadge.label}</Badge>
+          <Button
+            variant="outline"
+            onClick={() => void replay()}
+            disabled={!result || recording || busy || replaying}
+          >
+            {replaying ? <Loader2 className="animate-spin" /> : <Play />}
+            {replaying ? "回放中…" : "开始回放"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={resetRecording}
+            disabled={recording || busy || replaying || (steps.length === 0 && !result)}
+          >
+            <RefreshCw />
+            重新录制
+          </Button>
+          <Button
+            onClick={save}
+            disabled={!result || steps.length === 0 || recording || busy || replaying}
+          >
+            <Save />
+            保存记录
+          </Button>
+        </div>
+      </header>
+
+      <div className="mt-5 flex flex-col gap-5 xl:flex-row xl:items-start">
+        <div className="grid w-full min-w-0 shrink-0 content-start gap-4 xl:w-[380px]">
+          <Card className="gap-0 overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-line pb-3">
+              <CardTitle>录制配置</CardTitle>
+              <Badge variant="secondary">{systemName}</Badge>
+            </CardHeader>
+            <CardContent className="grid gap-3 pt-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="workbench-name">记录名称</Label>
+                <Input
+                  id="workbench-name"
+                  value={name}
+                  disabled={recording || replaying}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="例如：新建客户"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="workbench-target">目标地址</Label>
+                <Input
+                  id="workbench-target"
+                  className="font-mono text-[12px]"
+                  value={targetUrl}
+                  disabled={recording || replaying}
+                  onChange={(event) => setTargetUrl(event.target.value)}
+                  placeholder="http://dev.example.com/dashboard"
+                  spellCheck={false}
+                />
+                <p className="text-[11px] leading-4 text-muted">
+                  {proxyConfig?.proxied ? (
+                    <>
+                      同源代理 → <span className="break-all font-mono">{proxyConfig.targetUrl}</span>
+                      ，该目标下的页面可直接录制。
+                    </>
+                  ) : proxyError ? (
+                    `同源代理未启用：${proxyError}`
+                  ) : (
+                    "正在检测同源代理；未启用时只能录制与当前页面同源的地址。"
+                  )}
+                </p>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="workbench-token">登录 Token（可选）</Label>
+                <Input
+                  id="workbench-token"
+                  type="password"
+                  className="font-mono text-[12px]"
+                  value={token}
+                  disabled={recording || replaying}
+                  onChange={(event) => setToken(event.target.value)}
+                  placeholder="Bearer token / access_token"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <p className="text-[11px] leading-4 text-muted">
+                  会注入目标页的 token / access_token / Authorization / UserInfo.token。
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="gap-0 overflow-hidden">
+            <CardHeader className="border-b border-line pb-3">
+              <CardTitle>录制控制</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 pt-3">
+              <div
+                className={cn(
+                  "flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] leading-5",
+                  PHASE_BOX[phase],
+                )}
+              >
+                {recording ? (
+                  <span className="mt-[7px] size-1.5 shrink-0 animate-pulse rounded-full bg-danger" />
+                ) : null}
+                <span className="min-w-0 flex-1 break-words">{statusText}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => void openSystem()}
+                  disabled={busy || recording || replaying}
+                >
+                  {busy ? <Loader2 className="animate-spin" /> : <ArrowUpRight />}
+                  打开系统
+                </Button>
+                {recording ? (
+                  <Button variant="destructive" onClick={stopRecording}>
+                    <Square />
+                    停止并生成
+                  </Button>
+                ) : (
+                  <Button onClick={() => void startRecording()} disabled={busy || replaying}>
+                    {busy ? <Loader2 className="animate-spin" /> : <Mic />}
+                    开始录制
+                  </Button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <MiniStat label="EVENTS" value={steps.length} />
+                <MiniStat label="NODES" value={result?.dsl.nodes.length ?? 0} />
+                <MiniStat label="CONFIRM" value={needsConfirm} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="gap-0 overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-line pb-3">
+              <CardTitle>录制事件</CardTitle>
+              <Badge variant="secondary">{steps.length}</Badge>
+            </CardHeader>
+            <CardContent className="p-0">
+              {steps.length === 0 ? (
+                <p className="px-4 py-7 text-center text-[12px] leading-5 text-muted">
+                  还没有录制事件。开始录制后在右侧目标页完成点击、输入、下拉等操作。
+                </p>
+              ) : (
+                <ol className="max-h-[300px] divide-y divide-line overflow-y-auto">
+                  {steps.map((step, index) => (
+                    <li key={`${step.type ?? "step"}-${index}`} className="flex items-start gap-2.5 px-4 py-2">
+                      <span className="pt-0.5 font-mono text-[10px] text-muted">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge variant="outline">
+                            {RECORD_TYPE_LABEL[step.type ?? ""] ?? step.type ?? "步骤"}
+                          </Badge>
+                          <span className="min-w-0 truncate text-[12px] font-medium">
+                            {recordedStepLabel(step)}
+                          </span>
+                        </div>
+                        {step.type === "change" && step.value !== undefined ? (
+                          <p className="mt-0.5 truncate font-mono text-[10.5px] text-muted">
+                            值 {JSON.stringify(step.value)}
+                          </p>
+                        ) : null}
+                        {step.requests?.length ? (
+                          <p className="mt-0.5 truncate font-mono text-[10px] text-moss">
+                            {step.requests.map((request) => `${request.method} ${request.url}`).join(" · ")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="gap-0 overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-line pb-3">
+              <CardTitle>转换结果</CardTitle>
+              {result ? <Badge variant="moss">{result.dsl.nodes.length} NODES</Badge> : null}
+            </CardHeader>
+            <CardContent className="grid gap-3 pt-3">
+              {!result ? (
+                <p className="text-[12px] leading-5 text-muted">
+                  停止录制后自动把原始步骤转换成可执行节点，并给出跳过与待确认项。
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-muted">
+                    <Badge variant="secondary">{result.report.steps} 步</Badge>
+                    <Badge variant="moss">{result.report.nodes} 节点</Badge>
+                    {result.report.needsConfirm > 0 ? (
+                      <Badge variant="amber">{result.report.needsConfirm} 待确认</Badge>
+                    ) : null}
+                    {result.report.skipped.length > 0 ? (
+                      <span className="font-mono text-[10.5px]">
+                        跳过 {result.report.skipped.map((item) => `${item.type}×${item.count}`).join(" / ")}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {result.report.warnings.length > 0 ? (
+                    <div className="rounded-lg border border-amber/20 bg-amber-soft/60 px-2.5 py-2">
+                      <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-amber">
+                        <TriangleAlert className="size-3.5 shrink-0" />
+                        转换提示
+                      </div>
+                      <ul className="mt-1 grid gap-1 pl-5 text-[11px] leading-4 text-amber/90">
+                        {result.report.warnings.map((warning, index) => (
+                          <li key={index} className="list-disc break-words">
+                            {warning}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <div className="overflow-hidden rounded-lg border border-line bg-white">
+                    <div className="max-h-[220px] divide-y divide-line overflow-y-auto">
+                      {result.dsl.nodes.map((node, index) => (
+                        <div key={node.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                          <span className="font-mono text-[9.5px] text-muted">
+                            {String(index + 1).padStart(2, "0")}
+                          </span>
+                          <Badge variant="outline" className="shrink-0">
+                            {NODE_TYPE_LABEL[node.type]}
+                          </Badge>
+                          <span className="min-w-0 truncate text-[11.5px]">{nodeLabel(node)}</span>
+                          {node.meta?.needsConfirm ? (
+                            <TriangleAlert className="ml-auto size-3 shrink-0 text-amber" />
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-line bg-white/70 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-[11.5px] font-medium">
+                        <Play className="size-3.5 text-accent" />
+                        回放校验
+                      </span>
+                      {replaying ? (
+                        <span className="flex items-center gap-1 font-mono text-[10px] text-accent">
+                          <Loader2 className="size-3 animate-spin" />
+                          running
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-[11px] leading-4 text-muted">{replayText}</p>
+
+                    {runItems.length > 0 ? (
+                      <ol className="mt-2 max-h-[190px] divide-y divide-line overflow-y-auto rounded-lg border border-line bg-white">
+                        {runItems.map((item) => (
+                          <li key={item.nodeId} className="px-2.5 py-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-[9.5px] text-muted">
+                                {String(item.index + 1).padStart(2, "0")}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-[11.5px]">
+                                {item.name ?? item.message}
+                              </span>
+                              {item.durationMs !== undefined ? (
+                                <span className="font-mono text-[9.5px] text-muted">
+                                  {item.durationMs}ms
+                                </span>
+                              ) : null}
+                              <Badge variant={RUN_BADGE[item.status].variant}>
+                                {RUN_BADGE[item.status].label}
+                              </Badge>
+                            </div>
+                            {item.status !== "running" ? (
+                              <p className="mt-0.5 break-words pl-[22px] text-[10.5px] leading-4 text-muted">
+                                {item.message}
+                                {item.strategy ? (
+                                  <span className="ml-1 font-mono text-[9.5px] text-accent">
+                                    {item.strategy}
+                                  </span>
+                                ) : null}
+                              </p>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
+                  </div>
+
+                  <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted">
+                    <CheckCircle2 className="size-3 text-moss" />
+                    原始步骤与 DSL 会和记录一起存入 localStorage
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="w-full min-w-0 gap-0 overflow-hidden xl:flex-1">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <CardTitle>目标系统</CardTitle>
+              <Badge variant={replaying || recording ? "accent" : "secondary"}>{frameBadge}</Badge>
+            </div>
+            <div className="flex min-w-0 items-center gap-2">
+              {frameUrl ? (
+                <span className="hidden max-w-[360px] truncate font-mono text-[10.5px] text-muted lg:inline">
+                  {frameUrl}
+                </span>
+              ) : null}
+            </div>
+          </CardHeader>
+          <div className="relative">
+            <iframe
+              ref={iframeRef}
+              title="目标系统录制窗口"
+              className="h-[calc(100vh-232px)] min-h-[540px] w-full bg-white"
+            />
+            {!frameLoaded && !busy ? (
+              <div className="pointer-events-none absolute inset-0 grid place-items-center bg-paper/75 p-8 text-center backdrop-blur-[2px]">
+                <div className="max-w-[380px]">
+                  <div className="mx-auto grid size-11 place-items-center rounded-xl border border-line bg-white text-accent">
+                    <Video className="size-5" />
+                  </div>
+                  <h2 className="mt-3 text-[14px] font-semibold">目标系统尚未加载</h2>
+                  <p className="mt-1 text-[12px] leading-5 text-muted">
+                    点「打开系统」可先登录，或直接点「开始录制」加载目标页并开始捕获操作。
+                  </p>
+                  {record.systemId ? (
+                    <p className="mt-2 font-mono text-[10.5px] text-muted">
+                      系统地址可在 <Link className="text-accent underline underline-offset-2" to="/systems">系统管理</Link> 维护
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            {busy ? (
+              <div className="absolute inset-0 grid place-items-center bg-paper/70 backdrop-blur-[2px]">
+                <div className="flex items-center gap-2 rounded-full border border-line bg-white px-4 py-2 text-[12px] text-muted shadow-sm">
+                  <Loader2 className="size-4 animate-spin text-accent" />
+                  正在加载目标系统…
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}

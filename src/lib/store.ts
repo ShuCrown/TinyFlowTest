@@ -88,6 +88,10 @@ export function listRecords(): OperationRecord[] {
   return readList<OperationRecord>(RECORDS_KEY).sort(byUpdatedDesc);
 }
 
+export function getRecord(id: string): OperationRecord | undefined {
+  return listRecords().find((item) => item.id === id);
+}
+
 export function saveRecord(record: OperationRecord): void {
   const items = readList<OperationRecord>(RECORDS_KEY);
   const index = items.findIndex((item) => item.id === record.id);
