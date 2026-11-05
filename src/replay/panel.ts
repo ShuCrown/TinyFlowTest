@@ -140,13 +140,25 @@ export async function waitForPanelClosed(
   } while (true);
 }
 
-/** 级联的多列同时可见，逐级点击必须收紧到最后一列。 */
-export function pickScope(panel: Element, rule: PanelRule | undefined): Element {
-  if (rule?.id !== "antd-cascader") return panel;
+/**
+ * 级联的多列同时可见：
+ * - 有录制列号：只查该列；列还没渲染时返回空，让回放继续等待而不是在别的列里试；
+ * - 无录制列号（旧录制 / 外部 JSON）：从最后一列往前找，并优先命中更深层。
+ */
+export function pickScopes(
+  panel: Element,
+  rule: PanelRule | undefined,
+  column?: number,
+): Element[] {
+  if (rule?.id !== "antd-cascader") return [panel];
   const columns = Array.from(panel.querySelectorAll(rule.panel.at(-1) ?? ".ant-cascader-menu")).filter(
     isVisible,
   );
-  return columns[columns.length - 1] ?? panel;
+  if (column && column > 0) {
+    const target = columns[column - 1];
+    return target ? [target] : [];
+  }
+  return columns.length > 0 ? columns.slice().reverse() : [panel];
 }
 
 /** 与录制序号共用同一份选择器定义，见 panel-rules.selectorsForZone。 */

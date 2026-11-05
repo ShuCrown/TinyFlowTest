@@ -692,6 +692,16 @@ function buildSemantic(
     semantic.value = pickValue(match.element, rule);
     semantic.commit = isCommitTarget(match.element, rule);
     if (!semantic.commit && ordinal) semantic.index = ordinal;
+    // 级联是多列：记下列序号，转换期才能区分「同一项被重复点击」和「相邻列同名值」。
+    if (!semantic.commit && rule.id === "antd-cascader" && rule.itemScope) {
+      const panel = panelOf(match.element, rule);
+      const scope = itemScopeOf(match.element, rule);
+      const columns = panel
+        ? Array.from(panel.querySelectorAll(rule.itemScope)).filter(isVisible)
+        : [];
+      const position = scope ? columns.indexOf(scope) : -1;
+      if (position >= 0) semantic.column = position + 1;
+    }
   }
   return semantic;
 }

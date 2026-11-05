@@ -48,6 +48,8 @@ export interface StepSemantic {
   value?: string;
   /** 选项在可见列表中的位置（1 基），用于「按位置」配置与回放。 */
   index?: number;
+  /** 级联的列序号（1 基）：同名条目在相邻列（如 北京→北京）时靠它区分。 */
+  column?: number;
   /** 面板内的提交控件（如弹窗「确定」），转换期记为 commit 而不是选择项。 */
   commit?: boolean;
   /** 这次点击之后 800ms 内出现了弹层（无规则组件靠它起簇）。 */
@@ -533,6 +535,8 @@ function pickerNodeFromCluster(
     // 语义录制直接给值；外部 JSON 的结构折叠只能从 text= 选择器里取标签。
     value: step.semantic?.value ?? parseSelectorGroups(step.selectors).text ?? "",
     ...(step.semantic?.index ? { index: step.semantic.index } : {}),
+    // 级联多列：同一值可能在相邻列重复出现（如 北京→北京），回放必须回到录制列。
+    ...(step.semantic?.column ? { column: step.semantic.column } : {}),
   }));
   const isRow = cluster.picks.some(({ step }) => step.semantic?.zone === "row");
   const first = values[0]?.value ?? "";

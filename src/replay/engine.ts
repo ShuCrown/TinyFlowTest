@@ -24,7 +24,7 @@ import {
   itemSelectorsOf,
   panelSelectorOf,
   pickerRule,
-  pickScope,
+  pickScopes,
   waitForPanel,
   waitForPanelClosed,
 } from "./panel.ts";
@@ -414,7 +414,21 @@ async function executePicker(
       trigger.attempts,
     );
   }
-  const panel = resolution.element;
+  let panel = resolution.element;
+  /**
+   * 面板解析后仍可能被页面自身关闭（异步校验 / 重渲染 / 自动收起）。
+   * 保留触发器，面板被关掉时重新打开并重新解析，而不是对着隐藏元素等满超时。
+   */
+  let reopenCount = 0;
+  const reopenPanel = async (): Promise<Element | null> => {
+    if (node.mode !== "inline" || reopenCount >= 3) return null;
+    reopenCount += 1;
+    clickElement(control);
+    const next = await waitForPanel(doc, node, selector, Math.min(stage.open, 1500), () =>
+      ariaControlsOf(control),
+    );
+    return next?.element ?? null;
+  };
 
   if (node.filter && node.filter.steps.length > 0) {
     for (const [index, step] of node.filter.steps.entries()) {
@@ -454,8 +468,9 @@ async function executePicker(
   if (targets.length === 0) throw new ReplayError(`picker 没有可用的选择值: ${label}`);
 
   for (const target of targets) {
-    const element = await waitForPick(panel, node, rule, target, stage.pick);
-    clickElement(pickClickTarget(element, node));
+    const picked = await waitForPick(panel, node, rule, target, stage.pick, control, reopenPanel);
+    panel = picked.panel;
+    clickElement(pickClickTarget(picked.element, node));
     await sleep(0);
   }
 
@@ -483,8 +498,10 @@ async function executePicker(
   return { message, strategy: trigger.strategy, healed: trigger.healed };
 }
 
-/** 一次选择：按文本/行值，或按可见列表中的位置。 */
-type PickTarget = { kind: "text"; value: string } | { kind: "index"; index: number };
+/** 一次选择：按文本/行值，或按可见列表中的位置。column 是级联的录制列号。 */
+type PickTarget =
+  | { kind: "text"; value: string; column?: number }
+  | { kind: "index"; index: number; column?: number };
 
 /**
  * 选择目标。按位置时不做任何回退——位置错了要报错，不能悄悄换一项；
@@ -501,11 +518,24 @@ function pickTargets(
     if (invalid.length > 0) {
       throw new ReplayError(`picker 的位置配置无效: ${node.trigger.label ?? node.id}（${invalid.join(", ")}）`);
     }
-    return indexes.map((index) => ({ kind: "index" as const, index }));
+    return indexes.map((index, position) => ({
+      kind: "index" as const,
+      index,
+      column: recordedColumn(node, position),
+    }));
   }
   const edited = (override?.picks ?? []).filter((item) => item !== "");
   const picked = edited.length > 0 ? edited : pickerValues(node, values);
-  return picked.map((value) => ({ kind: "text" as const, value }));
+  return picked.map((value, position) => ({
+    kind: "text" as const,
+    value,
+    column: recordedColumn(node, position),
+  }));
+}
+
+/** 级联的录制列号；外部 JSON / 手工节点没有该信息，回放会退回最后一列。 */
+function recordedColumn(node: PickerNode, position: number): number | undefined {
+  return node.pick.values?.[position]?.column;
 }
 
 function describeTargets(targets: PickTarget[]): string {
@@ -596,26 +626,43 @@ async function waitForPick(
   rule: PanelRule | undefined,
   target: PickTarget,
   timeoutMs: number,
-): Promise<Element> {
+  control?: Element,
+  reopen?: () => Promise<Element | null>,
+): Promise<{ element: Element; panel: Element }> {
   const deadline = Date.now() + timeoutMs;
   const byRow = node.pick.strategy === "byRow" || node.pick.byIndex?.on === "row";
-  // 按位置时不能滚动：虚拟列表的「第 N 项」随渲染窗口变化，滚动只会让序号漂移。
-  const scroller = target.kind === "index" ? null : findScrollable(panel);
+  let currentPanel = panel;
   let exhausted = false;
+  let reopenAttempts = 0;
   do {
-    const scope = pickScope(panel, rule);
-    const found =
-      target.kind === "index"
-        ? findPickByIndex(scope, rule, byRow, target.index)
-        : findPickInScope(scope, rule, byRow, target.value);
-    if (found) return found;
+    // 面板可能在解析后被页面自身关掉：重新打开再继续，而不是等满超时。
+    if (!isVisible(currentPanel) && reopen && reopenAttempts < 3) {
+      reopenAttempts += 1;
+      const next = await reopen();
+      if (next) {
+        currentPanel = next;
+        exhausted = false;
+      }
+    }
+    const scopes = pickScopes(currentPanel, rule, target.column);
+    // 按位置的序号是按「当前列」算的；没有列号时只查最后一列，避免跨列误点。
+    const candidates = target.kind === "index" ? scopes.slice(0, 1) : scopes;
+    for (const scope of candidates) {
+      const found =
+        target.kind === "index"
+          ? findPickByIndex(scope, rule, byRow, target.index)
+          : findPickInScope(scope, rule, byRow, target.value);
+      if (found) return { element: found, panel: currentPanel };
+    }
     // 列表已经渲染出来还越界，就不是「再等等」能解决的：立即报错，别耗满超时。
-    if (target.kind === "index") {
-      const count = visibleItems(scope, rule, byRow).length;
+    if (target.kind === "index" && scopes[0]) {
+      const count = visibleItems(scopes[0], rule, byRow).length;
       if (count > 0 && target.index > count) {
         throw new ReplayError(`位置超出范围: 期望第 ${target.index} 项，当前面板 ${count} 项`);
       }
     }
+    // 按位置时不能滚动：虚拟列表的「第 N 项」随渲染窗口变化，滚动只会让序号漂移。
+    const scroller = target.kind === "index" ? null : findScrollable(currentPanel);
     // 虚拟列表只渲染窗口内的项：没找到就往下滚一屏，滚到底再回顶部补一遍。
     if (scroller) {
       const before = scroller.scrollTop;
@@ -631,10 +678,10 @@ async function waitForPick(
     await sleep(POLL_MS);
   } while (true);
   if (target.kind === "index") {
-    const count = visibleItems(pickScope(panel, rule), rule, byRow).length;
+    const count = visibleItems(scopeForReport(currentPanel, rule, target), rule, byRow).length;
     throw new ReplayError(`位置超出范围: 期望第 ${target.index} 项，当前面板 ${count} 项`);
   }
-  const options = visibleItems(pickScope(panel, rule), rule, byRow)
+  const options = visibleItems(scopeForReport(currentPanel, rule, target), rule, byRow)
     .slice(0, 8)
     .map((element) => {
       const label =
@@ -647,7 +694,55 @@ async function waitForPick(
     options.length > 0
       ? `（面板可见项：${options.join("、")}）`
       : "（面板内没有可见选项）";
-  throw new ReplayError(`选择项不存在: ${target.value}${detail}`);
+  const columnNote = target.column ? `（目标第 ${target.column} 列）` : "";
+  throw new ReplayError(
+    `选择项不存在: ${target.value}${detail}${columnNote}${describePickerPanel(currentPanel, node, rule, byRow, control)}`,
+  );
+}
+
+/** 诊断用：目标列已渲染就用目标列，否则退回最后一列，保证报错仍列出可视项。 */
+function scopeForReport(panel: Element, rule: PanelRule | undefined, target: PickTarget): Element {
+  return pickScopes(panel, rule, target.column)[0] ?? pickScopes(panel, rule)[0] ?? panel;
+}
+
+/** 面板绑定诊断：区分「绑错面板」与「选项未渲染/被隐藏」。 */
+function describePickerPanel(
+  panel: Element,
+  node: PickerNode,
+  rule: PanelRule | undefined,
+  byRow: boolean,
+  control?: Element,
+): string {
+  const selector = panelSelectorOf(node);
+  const panels = selector
+    ? Array.from(panel.ownerDocument.querySelectorAll(selector)).filter(isVisible)
+    : [];
+  const itemSelectors = itemSelectorsOf(rule, byRow);
+  const query = itemSelectors.join(", ");
+  const items = query ? Array.from(panel.querySelectorAll(query)) : [];
+  const visible = items.filter(isVisible).length;
+  const describe = (element: Element): string => {
+    const classes = (element.getAttribute("class") ?? "")
+      .split(/\s+/)
+      .filter((item) => item && !/^css-/.test(item) && !/^-/.test(item))
+      .slice(0, 2)
+      .join(".");
+    return `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ""}${classes ? `.${classes}` : ""}`;
+  };
+  const siblings = panels.map((element) => {
+    const count = query ? element.querySelectorAll(query).length : 0;
+    return `${describe(element)}(${count}项)`;
+  });
+  const content = normalizeText(panel.textContent ?? "").slice(0, 80);
+  const popupId = node.panel.popupId;
+  // 同名字段在多个表单/隐藏页里重复挂载时，id 会撞车；getElementById 只能拿到第一个。
+  const popupNodes = popupId
+    ? panel.ownerDocument.querySelectorAll(`[id=${JSON.stringify(popupId)}]`).length
+    : 0;
+  const controlName = control
+    ? `${control.tagName.toLowerCase()}${control.id ? `#${control.id}` : ""}${control.getAttribute("name") ? `[name=${control.getAttribute("name")}]` : ""}`
+    : "-";
+  return `；rule=${typeof node.meta?.rule === "string" ? node.meta.rule : "?"} strategy=${node.pick.strategy} binding=${node.panel.binding ?? "?"} popupId=${popupId ?? "-"} popupNodes=${popupNodes} liveControls=${control ? ariaControlsOf(control) ?? "-" : "-"} control=${controlName} trigger=${node.trigger.label ?? "-"}；当前面板 ${describe(panel)} ${items.length} 项（可见 ${visible}）文本=${JSON.stringify(content)}；可见面板 ${panels.length} 个${siblings.length > 0 ? `：${siblings.join(" / ")}` : ""}`;
 }
 
 /** 第 N 项就是可见列表的第 N 个元素；与录制序号共用同一个 visibleItems。 */

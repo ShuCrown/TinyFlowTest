@@ -149,6 +149,13 @@ function readSemanticCluster(steps: ChromeRecorderStep[], start: number): Found 
         end = j + 1;
         continue;
       }
+      // 级联把「再点一次同一个父项」当展开/无操作，不能再算一级路径；
+      // 同一父项可重复点击，路径里同名但跨列（如 北京→北京）的 selectors 不同，不会误删。
+      if (rule === "antd-cascader" && isSameCascaderItem(picks.at(-1)?.step, step)) {
+        indices.push(j);
+        end = j + 1;
+        continue;
+      }
       picks.push({ step, index: j });
       indices.push(j);
       end = j + 1;
@@ -337,5 +344,26 @@ function sameTarget(a: ChromeRecorderStep, b: ChromeRecorderStep): boolean {
 function hasTextSelector(step: ChromeRecorderStep): boolean {
   return (step.selectors ?? []).some((group) =>
     group.some((selector) => selector.startsWith("text/") || selector.startsWith("text=")),
+  );
+}
+
+/**
+ * 级联的同一列条目是否就是上一次点击的那个条目。
+ * 必须同时有列序号：没有列信息的外部 JSON 无法区分「重复点击」和「跨列同名值」，
+ * 宁可保留也不误删。
+ */
+function isSameCascaderItem(
+  previous: ChromeRecorderStep | undefined,
+  current: ChromeRecorderStep,
+): boolean {
+  const before = previous?.semantic;
+  const after = current.semantic;
+  if (!before || !after || before.column === undefined || after.column === undefined) {
+    return false;
+  }
+  return (
+    before.column === after.column &&
+    before.value === after.value &&
+    before.index === after.index
   );
 }

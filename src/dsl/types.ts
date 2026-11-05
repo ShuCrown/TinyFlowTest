@@ -205,6 +205,8 @@ export interface PickerPickValue {
   value?: string;
   /** 录制时该选项在可见列表中的位置（1 基）；外部 JSON 没有。 */
   index?: number;
+  /** 录制时选项所在的列序号（1 基）；级联靠它回点已展开面板里的父级项。 */
+  column?: number;
 }
 
 export interface PickerPick {

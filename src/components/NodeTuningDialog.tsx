@@ -559,13 +559,15 @@ function PickerRows({
 
       {Array.from({ length: pickCount }, (_, pickIndex) => {
         if (indexMode) {
+          const original = defaultIndexes[pickIndex] ?? 1;
+          const current = editor.indexes[pickIndex] ?? "";
           return (
             <TableRow key={`${node.id}:index:${pickIndex}`}>
               <TableCell className="text-[11.5px] text-muted">
                 位置 {pickIndex + 1}
-                <div className="text-[10px] text-muted/80">
-                  原位置 {defaultIndexes[pickIndex] ?? "-"}
-                </div>
+                {current === String(original) ? null : (
+                  <div className="text-[10px] text-muted/80">原位置：{original}</div>
+                )}
               </TableCell>
               <TableCell>
                 <span className="flex items-center gap-1.5 text-[11.5px] text-muted">
@@ -612,11 +614,14 @@ function PickerRows({
           );
         }
         const recorded = defaults[pickIndex] ?? "";
+        const current = editor.picks[pickIndex] ?? "";
         return (
           <TableRow key={`${node.id}:pick:${pickIndex}`}>
             <TableCell className="text-[11.5px] text-muted">
               选择 {pickIndex + 1}
-              <div className="text-[10px] text-muted/80">{recorded || "未记录值"}</div>
+              {current === recorded ? null : (
+                <div className="text-[10px] text-muted/80">原录制值：{recorded || "空"}</div>
+              )}
             </TableCell>
             <TableCell>
               <Input
