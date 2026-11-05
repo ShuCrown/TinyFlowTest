@@ -1,6 +1,7 @@
 import type {
   CellControl,
   CellRef,
+  ExtractNode,
   FlowDsl,
   FlowNode,
   InteractNode,
@@ -90,9 +91,19 @@ const PANEL_OPEN_TIMEOUT_MS = 1500;
  * 节点语义（定位候选链、回读校验、等待信号）保持一致。
  */
 export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
-  const { dsl, host, values = {}, signal, onEvent } = options;
+  const {
+    dsl,
+    host,
+    values = {},
+    vars = {},
+    onBeforeNode,
+    onNodeError,
+    signal,
+    onEvent,
+  } = options;
   const started = Date.now();
   const emit = (event: ReplayEvent): void => onEvent?.(event);
+  const env: Record<string, unknown> = { ...seedVars(dsl), ...vars };
   const nodes = new Map(dsl.nodes.map((node) => [node.id, node]));
   const outgoing = new Map<string, FlowDsl["edges"]>();
   for (const edge of dsl.edges) {
@@ -126,57 +137,142 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
       failure = `检测到重复执行节点: ${current}`;
       break;
     }
-    executed.add(current);
 
-    const index = results.length;
-    emit({ type: "node.started", nodeId: node.id, index, name: node.name });
-    const nodeStarted = Date.now();
+    let attempt = 0;
+    let interrupted = false;
+    let next: string | undefined;
 
-    if (node.enabled === false) {
-      const skipped: ReplayNodeResult = {
+    // 失败后人工可以要求重试：同一节点在此循环内重新执行，直到做出继续/跳过/停止的决定。
+    while (true) {
+      attempt += 1;
+      if (onBeforeNode) {
+        await onBeforeNode(node.id);
+        if (signal?.aborted) {
+          status = "canceled";
+          failure = "回放已取消";
+          interrupted = true;
+          break;
+        }
+      }
+      executed.add(node.id);
+
+      const index = results.length;
+      emit({
+        type: "node.started",
         nodeId: node.id,
+        index,
         name: node.name,
-        status: "skipped",
-        message: "节点已禁用，跳过执行",
-        durationMs: 0,
-      };
-      results.push(skipped);
-      emit({ type: "node.finished", node: skipped });
-      current = nextNode(outgoing.get(node.id));
-      continue;
+        groupId: groupIdOf(node),
+      });
+      const nodeStarted = Date.now();
+
+      if (node.enabled === false) {
+        const skipped: ReplayNodeResult = {
+          nodeId: node.id,
+          name: node.name,
+          groupId: groupIdOf(node),
+          status: "skipped",
+          message: "节点已禁用，跳过执行",
+          durationMs: 0,
+        };
+        results.push(skipped);
+        emit({ type: "node.finished", node: skipped });
+        next = nextNode(outgoing.get(node.id));
+        break;
+      }
+
+      try {
+        const outcome = await executeNode({
+          dsl,
+          host,
+          values,
+          env,
+          node,
+          isFirst: index === 0,
+          emit,
+        });
+        const record: ReplayNodeResult = {
+          nodeId: node.id,
+          name: node.name,
+          groupId: groupIdOf(node),
+          status: outcome.healed ? "healed" : "pass",
+          message: outcome.message,
+          strategy: outcome.strategy,
+          durationMs: Date.now() - nodeStarted,
+        };
+        results.push(record);
+        emit({ type: "node.finished", node: record });
+        next = nextNode(outgoing.get(node.id));
+        break;
+      } catch (error) {
+        const record: ReplayNodeResult = {
+          nodeId: node.id,
+          name: node.name,
+          groupId: groupIdOf(node),
+          status: "fail",
+          message: errorMessage(error),
+          durationMs: Date.now() - nodeStarted,
+        };
+        results.push(record);
+        emit({ type: "node.finished", node: record });
+        if (!onNodeError) {
+          status = "failed";
+          failure = `${node.name ?? node.id}: ${record.message}`;
+          interrupted = true;
+          break;
+        }
+        const decision = await onNodeError({
+          nodeId: node.id,
+          name: node.name,
+          type: node.type,
+          message: record.message,
+          attempt,
+          durationMs: record.durationMs,
+          varName: node.type === "extract" ? node.varName : undefined,
+        });
+        if (signal?.aborted) {
+          status = "canceled";
+          failure = "回放已取消";
+          interrupted = true;
+          break;
+        }
+        if (decision.action === "stop") {
+          status = "failed";
+          failure = `${node.name ?? node.id}: ${record.message}`;
+          interrupted = true;
+          break;
+        }
+        if (decision.action === "retry") {
+          // 撤销本次失败记录与去重标记，等价于重新执行当前节点。
+          results.pop();
+          executed.delete(node.id);
+          continue;
+        }
+        const finalRecord: ReplayNodeResult =
+          decision.action === "skip"
+            ? { ...record, status: "skipped", message: `人工跳过：${record.message}` }
+            : { ...record, status: "manual", message: `人工补全：${record.message}` };
+        if (decision.action === "continue" && node.type === "extract") {
+          for (const [name, value] of Object.entries(decision.vars ?? {})) {
+            env[name] = value;
+            emit({ type: "var.set", nodeId: node.id, name, value });
+          }
+        }
+        results[results.length - 1] = finalRecord;
+        emit({ type: "node.finished", node: finalRecord });
+        next = nextNode(outgoing.get(node.id));
+        break;
+      }
     }
 
-    try {
-      const outcome = await executeNode({ dsl, host, values, node, isFirst: index === 0 });
-      const record: ReplayNodeResult = {
-        nodeId: node.id,
-        name: node.name,
-        status: outcome.healed ? "healed" : "pass",
-        message: outcome.message,
-        strategy: outcome.strategy,
-        durationMs: Date.now() - nodeStarted,
-      };
-      results.push(record);
-      emit({ type: "node.finished", node: record });
-      current = nextNode(outgoing.get(node.id));
-    } catch (error) {
-      const record: ReplayNodeResult = {
-        nodeId: node.id,
-        name: node.name,
-        status: "fail",
-        message: errorMessage(error),
-        durationMs: Date.now() - nodeStarted,
-      };
-      results.push(record);
-      emit({ type: "node.finished", node: record });
-      status = "failed";
-      failure = `${node.name ?? node.id}: ${record.message}`;
-      break;
-    }
+    if (interrupted) break;
+    current = next;
   }
 
   const durationMs = Date.now() - started;
-  const passed = results.filter((item) => item.status === "pass" || item.status === "healed").length;
+  const passed = results.filter(
+    (item) => item.status === "pass" || item.status === "healed" || item.status === "manual",
+  ).length;
   emit({
     type: "run.finished",
     status,
@@ -191,7 +287,23 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
     nodes: results,
     error: failure,
     durationMs,
+    vars: { ...env },
   };
+}
+
+function groupIdOf(node: FlowNode): string | undefined {
+  const value = node.meta?.flowNodeId;
+  return typeof value === "string" ? value : undefined;
+}
+
+/** dsl.vars 只是环境变量的初始声明；运行期变量由 extract 节点写入。 */
+function seedVars(dsl: FlowDsl): Record<string, unknown> {
+  const env: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(dsl.vars ?? {})) {
+    const resolved = valueFromExpression(value, {});
+    if (resolved !== undefined) env[name] = resolved;
+  }
+  return env;
 }
 
 function nextNode(edges: FlowDsl["edges"] | undefined): string | undefined {
@@ -203,15 +315,23 @@ interface ExecuteContext {
   dsl: FlowDsl;
   host: ReplayHost;
   values: Record<string, unknown>;
+  /** 流程环境变量；extract 节点写入，后续节点读取。 */
+  env: Record<string, unknown>;
   node: FlowNode;
   isFirst: boolean;
+  emit: (event: ReplayEvent) => void;
+}
+
+/** 表达式作用域：环境变量优先，节点 id 覆盖值只用于按节点取值。 */
+function expressionScope(context: ExecuteContext): Record<string, unknown> {
+  return { ...context.values, ...context.env };
 }
 
 async function executeNode(context: ExecuteContext): Promise<NodeOutcome> {
   const { node } = context;
   const timeoutMs = node.timeoutMs ?? context.dsl.defaults?.nodeTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   for (const signal of node.pre ?? []) {
-    await waitSignal(context.host, signal, timeoutMs, context.values);
+    await waitSignal(context.host, signal, timeoutMs, expressionScope(context));
   }
   let outcome: NodeOutcome;
   switch (node.type) {
@@ -227,9 +347,12 @@ async function executeNode(context: ExecuteContext): Promise<NodeOutcome> {
     case "picker":
       outcome = await executePicker(context, node, timeoutMs);
       break;
+    case "extract":
+      outcome = await executeExtract(context, node, timeoutMs);
+      break;
   }
   for (const signal of node.expect ?? []) {
-    await waitSignal(context.host, signal, timeoutMs, context.values);
+    await waitSignal(context.host, signal, timeoutMs, expressionScope(context));
   }
   return outcome;
 }
@@ -297,7 +420,7 @@ async function executeInteract(
 
   switch (node.adapter) {
     case "input": {
-      const value = valueString(resolveNodeValue(node, context.values));
+      const value = valueString(resolveNodeValue(node, expressionScope(context)));
       // 搜索输入通常会随下拉一起出现；先确保面板打开，再写入筛选值。
       if (selectTrigger) await openSelect(selectTrigger);
       fillElement(element, value);
@@ -317,12 +440,12 @@ async function executeInteract(
     }
     case "nativeSelect":
     case "select": {
-      const value = valueString(resolveNodeValue(node, context.values));
+      const value = valueString(resolveNodeValue(node, expressionScope(context)));
       const actual = selectOption(element, value);
       return { message: `选择 ${label} ${JSON.stringify(actual)}`, strategy, healed };
     }
     case "check": {
-      const expected = resolveChecked(node, context.values);
+      const expected = resolveChecked(node, expressionScope(context));
       const actual = setChecked(element, expected);
       if (actual !== expected) {
         throw new ReplayError(
@@ -439,7 +562,9 @@ async function executePicker(
           ? edited
           : step.value === undefined
             ? ""
-            : valueString(valueFromExpression(step.value, context.values));
+            : valueString(
+                valueFromExpression(step.value, expressionScope(context), true),
+              );
       if (step.adapter === "input") {
         fillElement(found.element, value);
         const actual = readElementValue(found.element);
@@ -464,13 +589,33 @@ async function executePicker(
     if (remaining === 0) throw new ReplayError(`筛选后无结果: ${label}`);
   }
 
-  const targets = pickTargets(node, override, context.values);
+  const targets = pickTargets(node, override, expressionScope(context));
   if (targets.length === 0) throw new ReplayError(`picker 没有可用的选择值: ${label}`);
 
+  const rowOverride =
+    override?.strategy === "byRow"
+      ? true
+      : override?.strategy === "byText"
+        ? false
+        : override?.on === "row"
+          ? true
+          : override?.on === "item"
+            ? false
+            : undefined;
+
   for (const target of targets) {
-    const picked = await waitForPick(panel, node, rule, target, stage.pick, control, reopenPanel);
+    const picked = await waitForPick(
+      panel,
+      node,
+      rule,
+      target,
+      stage.pick,
+      control,
+      reopenPanel,
+      rowOverride,
+    );
     panel = picked.panel;
-    clickElement(pickClickTarget(picked.element, node));
+    clickElement(pickClickTarget(picked.element, node, rowOverride));
     await sleep(0);
   }
 
@@ -498,10 +643,22 @@ async function executePicker(
   return { message, strategy: trigger.strategy, healed: trigger.healed };
 }
 
-/** 一次选择：按文本/行值，或按可见列表中的位置。column 是级联的录制列号。 */
+/** 一次选择：按文本/行值、按可见列表位置，或筛选后的第一条。 */
 type PickTarget =
   | { kind: "text"; value: string; column?: number }
-  | { kind: "index"; index: number; column?: number };
+  | { kind: "index"; index: number; column?: number }
+  | { kind: "first"; column?: number };
+
+type PickerRuntimeStrategy = "byText" | "byRow" | "byIndex" | "firstVisible";
+
+/** 运行期微调：可覆盖筛选值、选择项、按位置序号和选择方式。 */
+interface PickerRuntimeOverride {
+  picks?: string[];
+  filters?: string[];
+  strategy?: PickerRuntimeStrategy;
+  indexes?: number[];
+  on?: "item" | "row";
+}
 
 /**
  * 选择目标。按位置时不做任何回退——位置错了要报错，不能悄悄换一项；
@@ -509,11 +666,18 @@ type PickTarget =
  */
 function pickTargets(
   node: PickerNode,
-  override: { picks?: string[]; filters?: string[] } | null,
+  override: PickerRuntimeOverride | null,
   values: Record<string, unknown>,
 ): PickTarget[] {
-  if (node.pick.strategy === "byIndex") {
-    const indexes = node.pick.byIndex?.indexes ?? [];
+  const strategy = override?.strategy ?? node.pick.strategy;
+  if (strategy === "firstVisible") {
+    return [{ kind: "first" as const, column: recordedColumn(node, 0) }];
+  }
+  if (strategy === "byIndex") {
+    const indexes =
+      override?.strategy === "byIndex"
+        ? (override.indexes ?? [])
+        : (node.pick.byIndex?.indexes ?? []);
     const invalid = indexes.filter((index) => !Number.isInteger(index) || index < 1);
     if (invalid.length > 0) {
       throw new ReplayError(`picker 的位置配置无效: ${node.trigger.label ?? node.id}（${invalid.join(", ")}）`);
@@ -540,17 +704,37 @@ function recordedColumn(node: PickerNode, position: number): number | undefined 
 
 function describeTargets(targets: PickTarget[]): string {
   return targets
-    .map((target) => (target.kind === "index" ? `第${target.index}项` : target.value))
+    .map((target) => {
+      if (target.kind === "index") return `第${target.index}项`;
+      if (target.kind === "first") return "筛选后第一项";
+      return target.value;
+    })
     .join(" / ");
 }
 
-/** 值微调面板写入 { picks, filters }；形状不对就当没改。 */
-function pickerOverride(value: unknown): { picks?: string[]; filters?: string[] } | null {
+/** 值微调面板写入 { picks, filters, strategy, indexes, on }；形状不对就当没改。 */
+function pickerOverride(value: unknown): PickerRuntimeOverride | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as { picks?: unknown; filters?: unknown };
+  const record = value as {
+    picks?: unknown;
+    filters?: unknown;
+    strategy?: unknown;
+    indexes?: unknown;
+    on?: unknown;
+  };
+  const strategy: PickerRuntimeStrategy | undefined =
+    record.strategy === "byText" ||
+    record.strategy === "byRow" ||
+    record.strategy === "byIndex" ||
+    record.strategy === "firstVisible"
+      ? record.strategy
+      : undefined;
   return {
     picks: Array.isArray(record.picks) ? record.picks.map((item) => String(item)) : undefined,
     filters: Array.isArray(record.filters) ? record.filters.map((item) => String(item)) : undefined,
+    strategy,
+    indexes: Array.isArray(record.indexes) ? record.indexes.map((item) => Number(item)) : undefined,
+    on: record.on === "row" ? "row" : record.on === "item" ? "item" : undefined,
   };
 }
 
@@ -560,7 +744,7 @@ function pickerValues(node: PickerNode, values: Record<string, unknown>): string
   if (recorded.length > 0) return recorded;
   const raw = node.pick.byText?.value ?? node.pick.byRow?.keyValue;
   if (raw === undefined) return [];
-  const resolved = valueFromExpression(raw, values);
+  const resolved = valueFromExpression(raw, values, true);
   if (Array.isArray(resolved)) return resolved.map(valueString).filter(Boolean);
   return resolved === undefined || resolved === null ? [] : [valueString(resolved)];
 }
@@ -628,9 +812,14 @@ async function waitForPick(
   timeoutMs: number,
   control?: Element,
   reopen?: () => Promise<Element | null>,
+  byRowOverride?: boolean,
 ): Promise<{ element: Element; panel: Element }> {
   const deadline = Date.now() + timeoutMs;
-  const byRow = node.pick.strategy === "byRow" || node.pick.byIndex?.on === "row";
+  const byRow =
+    byRowOverride ??
+    (node.pick.strategy === "byRow" ||
+      node.pick.byIndex?.on === "row" ||
+      node.pick.firstVisible?.on === "row");
   let currentPanel = panel;
   let exhausted = false;
   let reopenAttempts = 0;
@@ -651,7 +840,9 @@ async function waitForPick(
       const found =
         target.kind === "index"
           ? findPickByIndex(scope, rule, byRow, target.index)
-          : findPickInScope(scope, rule, byRow, target.value);
+          : target.kind === "first"
+            ? (visibleItems(scope, rule, byRow)[0] ?? null)
+            : findPickInScope(scope, rule, byRow, target.value);
       if (found) return { element: found, panel: currentPanel };
     }
     // 列表已经渲染出来还越界，就不是「再等等」能解决的：立即报错，别耗满超时。
@@ -695,8 +886,9 @@ async function waitForPick(
       ? `（面板可见项：${options.join("、")}）`
       : "（面板内没有可见选项）";
   const columnNote = target.column ? `（目标第 ${target.column} 列）` : "";
+  const wanted = target.kind === "first" ? "筛选后第一项" : target.value;
   throw new ReplayError(
-    `选择项不存在: ${target.value}${detail}${columnNote}${describePickerPanel(currentPanel, node, rule, byRow, control)}`,
+    `选择项不存在: ${wanted}${detail}${columnNote}${describePickerPanel(currentPanel, node, rule, byRow, control)}`,
   );
 }
 
@@ -787,8 +979,16 @@ function findPickInScope(
 }
 
 /** 行选择点行本身往往不生效，antd 的勾选控件在行内。 */
-function pickClickTarget(element: Element, node: PickerNode): Element {
-  const rowMode = node.pick.strategy === "byRow" || node.pick.byIndex?.on === "row";
+function pickClickTarget(
+  element: Element,
+  node: PickerNode,
+  byRowOverride?: boolean,
+): Element {
+  const rowMode =
+    byRowOverride ??
+    (node.pick.strategy === "byRow" ||
+      node.pick.byIndex?.on === "row" ||
+      node.pick.firstVisible?.on === "row");
   if (!rowMode) return element;
   return element.querySelector('input[type="checkbox"]') ?? element;
 }
@@ -823,7 +1023,7 @@ async function executeWait(
   timeoutMs: number,
 ): Promise<NodeOutcome> {
   const condition = node.condition;
-  await waitSignal(context.host, condition, timeoutMs, context.values);
+  await waitSignal(context.host, condition, timeoutMs, expressionScope(context));
   return {
     message:
       typeof condition === "string"
@@ -833,20 +1033,60 @@ async function executeWait(
   };
 }
 
+async function executeExtract(
+  context: ExecuteContext,
+  node: ExtractNode,
+  timeoutMs: number,
+): Promise<NodeOutcome> {
+  const target = await waitForTarget(context.host, node.target, timeoutMs, {
+    requireVisible: true,
+    allowMultiple: false,
+  });
+  const raw = readExtractValue(target.element, node);
+  const value = applyExtractPattern(raw, node);
+  if (!value) {
+    const message = `取值节点未取到 ${node.varName}: ${node.target.label ?? node.id}`;
+    if (node.optional) return { message: `${message}（已忽略）`, strategy: target.strategy, healed: target.healed };
+    throw new ReplayError(message, target.attempts);
+  }
+  context.env[node.varName] = value;
+  context.emit({ type: "var.set", nodeId: node.id, name: node.varName, value });
+  return {
+    message: `取值 ${node.varName} = ${JSON.stringify(value)}`,
+    strategy: target.strategy,
+    healed: target.healed,
+  };
+}
+
+function readExtractValue(element: Element, node: ExtractNode): string {
+  if (node.read === "value") return readElementValue(element);
+  if (node.read === "attribute") {
+    const attribute = (node.attribute ?? "").trim();
+    if (!attribute) throw new ReplayError(`取值节点 ${node.id} 未配置属性名`);
+    return element.getAttribute(attribute) ?? "";
+  }
+  return element.textContent ?? "";
+}
+
+function applyExtractPattern(raw: string, node: ExtractNode): string {
+  const text = raw.trim();
+  if (!node.pattern) return normalizeText(text);
+  let regex: RegExp;
+  try {
+    regex = new RegExp(node.pattern);
+  } catch {
+    throw new ReplayError(`取值节点 ${node.id} 的正则无效: ${node.pattern}`);
+  }
+  const match = text.match(regex);
+  if (!match) return "";
+  return normalizeText(match[1] ?? match[0]);
+}
+
 function resolveNodeValue(node: InteractNode, values: Record<string, unknown>): unknown {
   if (Object.prototype.hasOwnProperty.call(values, node.id)) return values[node.id];
   const value = node.value;
   if (value === undefined) return "";
-  if (value && typeof value === "object" && "kind" in value) {
-    const expr = value as { kind: string; value?: unknown; name?: string };
-    if (expr.kind === "literal") return expr.value;
-    if (expr.kind === "var" && expr.name) {
-      if (Object.prototype.hasOwnProperty.call(values, expr.name)) return values[expr.name];
-      throw new ReplayError(`变量未提供值: ${expr.name}`);
-    }
-    throw new ReplayError(`浏览器演示暂不支持 ${expr.kind} 取值表达式`);
-  }
-  return value;
+  return valueFromExpression(value, values, true);
 }
 
 function resolveChecked(node: InteractNode, values: Record<string, unknown>): boolean {
@@ -1243,11 +1483,37 @@ async function waitText(
   );
 }
 
-function valueFromExpression(value: unknown, values: Record<string, unknown>): unknown {
+function valueFromExpression(
+  value: unknown,
+  values: Record<string, unknown>,
+  strict = false,
+): unknown {
   if (value && typeof value === "object" && "kind" in value) {
-    const expr = value as { kind: string; value?: unknown; name?: string };
+    const expr = value as {
+      kind: string;
+      value?: unknown;
+      name?: string;
+      template?: string;
+    };
     if (expr.kind === "literal") return expr.value;
-    if (expr.kind === "var" && expr.name) return values[expr.name];
+    if (expr.kind === "var" && expr.name) {
+      if (Object.prototype.hasOwnProperty.call(values, expr.name)) return values[expr.name];
+      if (strict) throw new ReplayError(`变量未提供值: ${expr.name}`);
+      return undefined;
+    }
+    if (expr.kind === "template" && typeof expr.template === "string") {
+      return expr.template.replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g, (_match, name: string) => {
+        if (!Object.prototype.hasOwnProperty.call(values, name)) {
+          if (strict) throw new ReplayError(`变量未提供值: ${name}`);
+          return "";
+        }
+        return valueString(values[name]);
+      });
+    }
+    if (expr.kind === "dataset") {
+      if (strict) throw new ReplayError("浏览器演示暂不支持 dataset 取值表达式");
+      return undefined;
+    }
   }
   return value;
 }

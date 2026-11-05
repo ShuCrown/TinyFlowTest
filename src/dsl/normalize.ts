@@ -103,6 +103,7 @@ function normalizePicker(node: PickerNode): PickerNode {
             on: node.pick.byIndex.on,
           }
         : undefined,
+      firstVisible: node.pick.firstVisible ? { ...node.pick.firstVisible } : undefined,
       byRow: node.pick.byRow
         ? {
             ...node.pick.byRow,
@@ -139,6 +140,8 @@ function normalizeNode(node: FlowNode): FlowNode {
       return normalizePicker(base);
     case "wait":
       return { ...base, condition: normalizeSignal(base.condition) };
+    case "extract":
+      return { ...base, target: normalizeTarget(base.target) };
   }
 }
 

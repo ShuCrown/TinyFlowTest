@@ -326,6 +326,48 @@ body {
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
+
+  .tf-flow .react-flow__controls {
+    overflow: hidden;
+    border: 1px solid var(--color-line);
+    border-radius: 9px;
+    box-shadow: 0 8px 24px rgba(27, 28, 29, 0.08);
+  }
+
+  .tf-flow .react-flow__controls-button {
+    border-bottom: 1px solid var(--color-line);
+    background: #fff;
+    color: var(--color-ink);
+  }
+
+  .tf-flow .react-flow__controls-button:hover {
+    background: var(--color-accent-soft);
+  }
+
+  .tf-flow .react-flow__minimap {
+    overflow: hidden;
+    border: 1px solid var(--color-line);
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .tf-flow .react-flow__handle {
+    width: 8px;
+    height: 8px;
+  }
+
+  .tf-flow .react-flow__handle:hover {
+    background: var(--color-accent) !important;
+  }
+
+  .tf-flow .react-flow__edge.selected .react-flow__edge-path {
+    stroke: var(--color-accent);
+    stroke-width: 2.5;
+  }
+
+  .tf-flow .react-flow__attribution {
+    display: none;
+  }
 }
 
 @keyframes tf-fade {

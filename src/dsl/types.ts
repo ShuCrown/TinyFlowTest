@@ -182,6 +182,21 @@ export interface WaitNode extends NodeBase {
   message?: string;
 }
 
+/** 从当前页面读取一个值，写入流程环境变量。 */
+export interface ExtractNode extends NodeBase {
+  type: "extract";
+  target: TargetRef;
+  /** 读取来源：文本、表单值或某个属性。 */
+  read: "text" | "value" | "attribute";
+  attribute?: string;
+  /** 可选清洗正则；有捕获组时取第一组，否则取整个匹配。 */
+  pattern?: string;
+  /** 流程环境变量名。 */
+  varName: string;
+  /** 取不到值时是否允许继续；默认失败。 */
+  optional?: boolean;
+}
+
 /** 复合选择器：一次意图 = 打开面板 + 可选筛选 + 选项/行 + 可选提交。 */
 export type PickerMode = "inline" | "dialog";
 
@@ -210,7 +225,7 @@ export interface PickerPickValue {
 }
 
 export interface PickerPick {
-  strategy: "byText" | "byRow" | "byIndex";
+  strategy: "byText" | "byRow" | "byIndex" | "firstVisible";
   /** 按值逐个点击。级联的多级路径也放在这里；multi 只表示多选，不表示路径。 */
   byText?: { value?: ValueLike; match?: "exact" | "contains" };
   byRow?: { keyColumn?: string; keyValue?: ValueLike; clickTarget?: TargetRef };
@@ -219,6 +234,8 @@ export interface PickerPick {
    * indexes 与 values 一一对应，按点击顺序排列。
    */
   byIndex?: { indexes: number[]; on?: "item" | "row" };
+  /** 筛选后直接取第一条可见项；on 决定点选项本身还是行。 */
+  firstVisible?: { on?: "item" | "row" };
   multi?: boolean;
   /** 扩展：录制到的每个选项，顺序与点击顺序一致。 */
   values?: PickerPickValue[];
@@ -238,7 +255,7 @@ export interface PickerNode extends NodeBase {
   stageTimeouts?: { openMs?: number; filterMs?: number; pickMs?: number; closeMs?: number };
 }
 
-export type FlowNode = NavigateNode | InteractNode | PickerNode | WaitNode;
+export type FlowNode = NavigateNode | InteractNode | PickerNode | WaitNode | ExtractNode;
 
 export interface FlowEdge {
   from: string;

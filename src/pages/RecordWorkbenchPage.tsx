@@ -93,15 +93,17 @@ const NODE_TYPE_LABEL: Record<FlowNode["type"], string> = {
   interact: "交互",
   picker: "选择器",
   wait: "等待",
+  extract: "取值",
 };
 
 const RUN_BADGE: Record<
   RunStatus,
-  { label: string; variant: "secondary" | "moss" | "amber" | "destructive" }
+  { label: string; variant: "secondary" | "moss" | "accent" | "amber" | "destructive" }
 > = {
   running: { label: "执行中", variant: "secondary" },
   pass: { label: "通过", variant: "moss" },
   healed: { label: "自愈", variant: "amber" },
+  manual: { label: "人工完成", variant: "accent" },
   fail: { label: "失败", variant: "destructive" },
   skipped: { label: "跳过", variant: "secondary" },
 };
@@ -489,6 +491,7 @@ export function RecordWorkbenchPage() {
             );
             return;
           }
+          if (event.type === "var.set") return;
           const seconds = (event.durationMs / 1000).toFixed(1);
           setReplayText(
             event.status === "finished"

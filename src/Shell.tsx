@@ -7,10 +7,13 @@ const NAV = [
 ];
 
 const WORKBENCH_PATH = /^\/records\/[^/]+\/record\/?$/;
+const CANVAS_PATH = /^\/flows\/[^/]+\/canvas\/?$/;
 
 export function Shell() {
   const { pathname } = useLocation();
   const isWorkbench = WORKBENCH_PATH.test(pathname);
+  const isCanvas = CANVAS_PATH.test(pathname);
+  const fullWidth = isWorkbench || isCanvas;
 
   return (
     <div className="flex min-h-screen">
@@ -54,8 +57,10 @@ export function Shell() {
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 px-4 py-6 md:px-8 lg:px-10">
-        <div className={`w-full ${isWorkbench ? "" : "mx-auto max-w-[1180px]"}`}>
+      <main
+        className={`min-w-0 flex-1 ${isCanvas ? "px-3 py-3 lg:px-4 lg:py-4" : "px-4 py-6 md:px-8 lg:px-10"}`}
+      >
+        <div className={`w-full ${fullWidth ? "" : "mx-auto max-w-[1180px]"}`}>
           <Outlet />
         </div>
       </main>

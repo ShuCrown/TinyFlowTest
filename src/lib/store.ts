@@ -111,6 +111,10 @@ export function listFlows(): FlowItem[] {
   return readList<FlowItem>(FLOWS_KEY).sort(byUpdatedDesc);
 }
 
+export function getFlow(id: string): FlowItem | undefined {
+  return listFlows().find((item) => item.id === id);
+}
+
 export function saveFlow(flow: FlowItem): void {
   const items = readList<FlowItem>(FLOWS_KEY);
   const index = items.findIndex((item) => item.id === flow.id);

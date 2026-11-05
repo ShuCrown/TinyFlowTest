@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { Badge, Button, Dialog, EmptyState, Field, PageHeader, StatCard } from "../components/ui";
 import { deleteFlow, formatTime, listFlows, newId, saveFlow } from "../lib/store";
 import type { FlowItem } from "../lib/types";
@@ -39,7 +40,7 @@ function FlowDialog({
     <Dialog
       open
       title={flow ? "编辑流程" : "新建流程"}
-      description="流程用来组织多条操作记录的执行顺序。画布编排和编号扣子会在下一步接入。"
+      description="流程用来组织多条操作记录的执行顺序。保存后进入画布，用取值节点把上一步的主键 code 带到下一步。"
       onClose={onClose}
       footer={
         <>
@@ -79,6 +80,7 @@ function FlowDialog({
 }
 
 export function FlowsPage() {
+  const navigate = useNavigate();
   const [flows, setFlows] = useState<FlowItem[]>(() => listFlows());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<FlowItem | null>(null);
@@ -99,6 +101,7 @@ export function FlowsPage() {
 
   const handleSave = (draft: FlowDraft): void => {
     const now = new Date().toISOString();
+    const wasEditing = Boolean(editing);
     const next: FlowItem = editing
       ? { ...editing, ...draft, updatedAt: now }
       : {
@@ -106,6 +109,7 @@ export function FlowsPage() {
           id: newId("flw"),
           recordCount: 0,
           status: "draft",
+          graph: { nodes: [], edges: [], injections: [], vars: [] },
           createdAt: now,
           updatedAt: now,
         };
@@ -113,6 +117,7 @@ export function FlowsPage() {
     setFlows(listFlows());
     setEditing(null);
     setDialogOpen(false);
+    if (!wasEditing) navigate(`/flows/${next.id}/canvas`);
   };
 
   const handleDelete = (flow: FlowItem): void => {
@@ -126,7 +131,7 @@ export function FlowsPage() {
       <PageHeader
         code="FLW / FLOWS"
         title="流程"
-        description="流程把多条操作记录串成顺序执行链，用一个稳定的流程编号选择执行；编号扣子负责把前一步的产出带到下一步的表单或筛选。"
+        description="流程把多条操作记录串成顺序执行链；画布里的取值节点负责把前一步保存的主键 code 变成环境变量，再注入下一步的筛选与选择。"
         actions={
           <Button variant="primary" onClick={openCreate}>
             新建流程
@@ -204,6 +209,9 @@ export function FlowsPage() {
               </div>
 
               <div className="mt-3 flex gap-2">
+                <Button size="sm" variant="primary" onClick={() => navigate(`/flows/${flow.id}/canvas`)}>
+                  画布编排
+                </Button>
                 <Button size="sm" onClick={() => openEdit(flow)}>
                   编辑
                 </Button>
