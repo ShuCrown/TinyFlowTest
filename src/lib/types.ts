@@ -25,6 +25,8 @@ export interface OperationRecord {
   /** 录制步骤转换后的 DSL 与统计报告。 */
   dsl?: FlowDsl;
   report?: RecordingImportReport;
+  /** 回放前微调值，按 nodeId 存；picker 使用 { picks, filters }。 */
+  values?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

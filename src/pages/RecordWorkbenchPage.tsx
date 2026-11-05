@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
-  ArrowUpRight,
   CheckCircle2,
   Loader2,
   Mic,
   Play,
   RefreshCw,
   Save,
+  SlidersHorizontal,
   Square,
   TriangleAlert,
   Video,
@@ -17,8 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { NodeTuningDialog } from "@/components/NodeTuningDialog";
 import { cn } from "@/lib/utils";
 import { getRecord, getSystemToken, listSystems, saveRecord, saveSystemToken } from "@/lib/store";
 import {
@@ -27,7 +26,7 @@ import {
   resolveTargetUrl,
   type ProxyConfig,
 } from "@/lib/proxy";
-import type { FlowNode } from "@/dsl/index.ts";
+import type { FlowDsl, FlowNode } from "@/dsl/index.ts";
 import { DomRecorder } from "@/recorder/dom-recorder.ts";
 import {
   importChromeRecorder,
@@ -146,15 +145,6 @@ function injectSystemToken(doc: Document, raw: string): void {
   }
 }
 
-function MiniStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-line bg-white px-2 py-1.5 text-center">
-      <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted">{label}</div>
-      <div className="mt-0.5 font-mono text-[14px] font-semibold leading-none">{value}</div>
-    </div>
-  );
-}
-
 export function RecordWorkbenchPage() {
   const { recordId } = useParams<{ recordId: string }>();
   const navigate = useNavigate();
@@ -167,20 +157,19 @@ export function RecordWorkbenchPage() {
     ? (systems.find((system) => system.id === record.systemId)?.name ?? "系统已删除")
     : "未绑定系统";
 
-  const [name, setName] = useState(record?.name ?? "");
-  const [targetUrl, setTargetUrl] = useState(record?.targetUrl ?? "");
-  const [token, setToken] = useState(() =>
-    record?.systemId ? getSystemToken(record.systemId) : "",
-  );
+  // 配置统一在「记录管理」和「系统管理」维护，工作台只读取，不再重复展示。
+  const targetUrl = record?.targetUrl ?? "";
+  const token = record?.systemId ? getSystemToken(record.systemId) : "";
   const [steps, setSteps] = useState<ChromeRecorderStep[]>(record?.recording?.steps ?? []);
   const [result, setResult] = useState<RecordingImportResult | null>(
     record?.dsl && record.report ? { dsl: record.dsl, report: record.report } : null,
   );
+  const [overrides, setOverrides] = useState<Record<string, unknown>>(record?.values ?? {});
+  const [tuningOpen, setTuningOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>(record?.dsl ? "saved" : "idle");
+  // 已载入历史记录时保持安静，不额外占用一行提示；只有实际操作后才显示状态。
   const [statusText, setStatusText] = useState(
-    record?.dsl
-      ? "已载入上次录制结果，可查看节点或清空后重新录制。"
-      : "点「打开系统」加载目标页，或直接点「开始录制」。",
+    record?.dsl ? "" : "点右上角「开始录制」加载目标页并开始捕获操作。",
   );
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -298,13 +287,13 @@ export function RecordWorkbenchPage() {
   const convert = (captured: ChromeRecorderStep[]): void => {
     try {
       const converted = importChromeRecorder({
-        recording: { title: name.trim() || record.name, steps: captured },
+        recording: { title: record.name, steps: captured },
         system: {
           id: record.systemId || "local",
           name: systemName,
           baseUrl: window.location.origin,
         },
-        flowName: name.trim() || record.name,
+        flowName: record.name,
       });
       setResult(converted);
       setPhase("finished");
@@ -358,40 +347,13 @@ export function RecordWorkbenchPage() {
     return doc;
   };
 
-  const openSystem = async (): Promise<void> => {
-    if (busy || recording || replaying) return;
-    setBusy(true);
-    setPhase("opening");
-    setStatusText("正在加载目标系统…");
-    setFrameLoaded(false);
-    try {
-      const doc = await prepareTarget();
-      try {
-        setFrameUrl(iframeRef.current?.contentWindow?.location.href ?? "");
-      } catch {
-        setFrameUrl("");
-      }
-      if (doc.querySelector('input[type="password"]')) {
-        setPhase("login");
-        setStatusText("已打开登录页：请在右侧完成登录，再点「开始录制」。");
-      } else {
-        setPhase("idle");
-        setStatusText("目标系统已打开，可点「开始录制」。");
-      }
-      if (record.systemId) saveSystemToken(record.systemId, token);
-    } catch (error) {
-      setPhase("failed");
-      setStatusText(`打开目标系统失败：${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const startRecording = async (): Promise<void> => {
     if (busy || recording || replaying) return;
     setBusy(true);
     setResult(null);
     setSteps([]);
+    setOverrides({});
+    setTuningOpen(false);
     setRunItems([]);
     setReplayText("生成节点后可在右侧目标系统回放校验。");
     setPhase("opening");
@@ -428,33 +390,16 @@ export function RecordWorkbenchPage() {
     }
   };
 
-  const resetRecording = (): void => {
-    if (replaying) return;
-    if (recording) {
-      recorderRef.current?.stop();
-      setRecording(false);
-    }
-    setSteps([]);
-    setResult(null);
-    setRunItems([]);
-    setReplayText("生成节点后可在右侧目标系统回放校验。");
-    setPhase("idle");
-    setStatusText("已清空本次录制，点「开始录制」重新捕获操作。");
-    setFrameLoaded(Boolean(iframeRef.current?.contentDocument));
-  };
-
   const save = (): void => {
     if (!result || steps.length === 0 || recording || replaying) return;
     const now = new Date().toISOString();
-    const cleanName = name.trim() || record.name;
-    const recordingJson: ChromeRecorderRecording = { title: cleanName, steps };
+    const recordingJson: ChromeRecorderRecording = { title: record.name, steps };
     const next: OperationRecord = {
       ...record,
-      name: cleanName,
-      targetUrl: targetUrl.trim() || record.targetUrl,
       recording: recordingJson,
       dsl: result.dsl,
       report: result.report,
+      values: overrides,
       steps: steps.length,
       nodes: result.dsl.nodes.length,
       status: "ready",
@@ -463,15 +408,21 @@ export function RecordWorkbenchPage() {
     try {
       saveRecord(next);
       if (record.systemId) saveSystemToken(record.systemId, token);
-      setName(cleanName);
       setPhase("saved");
-      setStatusText(`已保存「${cleanName}」· ${steps.length} 步 / ${result.dsl.nodes.length} 节点`);
+      setStatusText(`已保存「${record.name}」· ${steps.length} 步 / ${result.dsl.nodes.length} 节点`);
     } catch (error) {
       setPhase("failed");
       setStatusText(
         `保存失败：${error instanceof Error ? error.message : String(error)}（localStorage 可能已满）`,
       );
     }
+  };
+
+  const applyTuning = (next: { dsl: FlowDsl; values: Record<string, unknown> }): void => {
+    setResult((prev) => (prev ? { ...prev, dsl: next.dsl } : prev));
+    setOverrides(next.values);
+    setTuningOpen(false);
+    setReplayText("微调值已更新，可点「开始回放」校验。");
   };
 
   const replay = async (): Promise<void> => {
@@ -502,6 +453,7 @@ export function RecordWorkbenchPage() {
       await runFlow({
         dsl,
         host,
+        values: overrides,
         onEvent: (event: ReplayEvent) => {
           if (event.type === "run.started") {
             setReplayText(`回放中 · 0/${event.totalNodes} 节点`);
@@ -561,10 +513,12 @@ export function RecordWorkbenchPage() {
   const frameBadge = replaying ? "回放中" : recording ? "录制中" : frameLoaded ? "已加载" : "未加载";
   const phaseBadge = PHASE_BADGE[phase];
   const needsConfirm = result?.report.needsConfirm ?? 0;
+  const hasDraft = steps.length > 0 || Boolean(result);
+  const overrideCount = Object.keys(overrides).length;
 
   return (
-    <div className="pb-10">
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
+    <div className="flex flex-col pb-10 xl:h-[calc(100vh-48px)] xl:overflow-hidden xl:pb-0">
+      <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
         <div className="flex min-w-0 items-start gap-3">
           <Button
             variant="outline"
@@ -577,9 +531,7 @@ export function RecordWorkbenchPage() {
           </Button>
           <div className="min-w-0">
             <span className="tf-kicker">REC / WORKBENCH</span>
-            <h1 className="tf-display mt-1 truncate text-[26px] leading-tight">
-              {name.trim() || record.name}
-            </h1>
+            <h1 className="tf-display mt-1 truncate text-[26px] leading-tight">{record.name}</h1>
             <p className="mt-1 truncate text-[12.5px] text-muted">
               {systemName} · <span className="font-mono text-[11.5px]">{targetUrl || "未设置目标地址"}</span>
             </p>
@@ -589,139 +541,45 @@ export function RecordWorkbenchPage() {
           <Badge variant={phaseBadge.variant}>{phaseBadge.label}</Badge>
           <Button
             variant="outline"
-            onClick={() => void replay()}
-            disabled={!result || recording || busy || replaying}
-          >
-            {replaying ? <Loader2 className="animate-spin" /> : <Play />}
-            {replaying ? "回放中…" : "开始回放"}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={resetRecording}
-            disabled={recording || busy || replaying || (steps.length === 0 && !result)}
-          >
-            <RefreshCw />
-            重新录制
-          </Button>
-          <Button
             onClick={save}
             disabled={!result || steps.length === 0 || recording || busy || replaying}
           >
             <Save />
             保存记录
           </Button>
+          {recording ? (
+            <Button variant="destructive" onClick={stopRecording}>
+              <Square />
+              停止并生成
+            </Button>
+          ) : (
+            <Button onClick={() => void startRecording()} disabled={busy || replaying}>
+              {busy ? <Loader2 className="animate-spin" /> : hasDraft ? <RefreshCw /> : <Mic />}
+              {busy ? "加载中…" : hasDraft ? "重新录制" : "开始录制"}
+            </Button>
+          )}
         </div>
       </header>
 
-      <div className="mt-5 flex flex-col gap-5 xl:flex-row xl:items-start">
-        <div className="grid w-full min-w-0 shrink-0 content-start gap-4 xl:w-[380px]">
-          <Card className="gap-0 overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between border-b border-line pb-3">
-              <CardTitle>录制配置</CardTitle>
-              <Badge variant="secondary">{systemName}</Badge>
-            </CardHeader>
-            <CardContent className="grid gap-3 pt-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="workbench-name">记录名称</Label>
-                <Input
-                  id="workbench-name"
-                  value={name}
-                  disabled={recording || replaying}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder="例如：新建客户"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="workbench-target">目标地址</Label>
-                <Input
-                  id="workbench-target"
-                  className="font-mono text-[12px]"
-                  value={targetUrl}
-                  disabled={recording || replaying}
-                  onChange={(event) => setTargetUrl(event.target.value)}
-                  placeholder="http://dev.example.com/dashboard"
-                  spellCheck={false}
-                />
-                <p className="text-[11px] leading-4 text-muted">
-                  {proxyConfig?.proxied ? (
-                    <>
-                      同源代理 → <span className="break-all font-mono">{proxyConfig.targetUrl}</span>
-                      ，该目标下的页面可直接录制。
-                    </>
-                  ) : proxyError ? (
-                    `同源代理未启用：${proxyError}`
-                  ) : (
-                    "正在检测同源代理；未启用时只能录制与当前页面同源的地址。"
-                  )}
-                </p>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="workbench-token">登录 Token（可选）</Label>
-                <Input
-                  id="workbench-token"
-                  type="password"
-                  className="font-mono text-[12px]"
-                  value={token}
-                  disabled={recording || replaying}
-                  onChange={(event) => setToken(event.target.value)}
-                  placeholder="Bearer token / access_token"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <p className="text-[11px] leading-4 text-muted">
-                  会注入目标页的 token / access_token / Authorization / UserInfo.token。
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+      {statusText ? (
+        <div
+          className={cn(
+            "mt-4 flex shrink-0 flex-wrap items-start gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-[12px] leading-5",
+            PHASE_BOX[phase],
+          )}
+        >
+          {recording ? (
+            <span className="mt-[7px] size-1.5 shrink-0 animate-pulse rounded-full bg-danger" />
+          ) : null}
+          <span className="min-w-0 flex-1 break-words">{statusText}</span>
+          <span className="shrink-0 font-mono text-[10px] opacity-70">
+            EVENTS {steps.length} · NODES {result?.dsl.nodes.length ?? 0} · CONFIRM {needsConfirm}
+          </span>
+        </div>
+      ) : null}
 
-          <Card className="gap-0 overflow-hidden">
-            <CardHeader className="border-b border-line pb-3">
-              <CardTitle>录制控制</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 pt-3">
-              <div
-                className={cn(
-                  "flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] leading-5",
-                  PHASE_BOX[phase],
-                )}
-              >
-                {recording ? (
-                  <span className="mt-[7px] size-1.5 shrink-0 animate-pulse rounded-full bg-danger" />
-                ) : null}
-                <span className="min-w-0 flex-1 break-words">{statusText}</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => void openSystem()}
-                  disabled={busy || recording || replaying}
-                >
-                  {busy ? <Loader2 className="animate-spin" /> : <ArrowUpRight />}
-                  打开系统
-                </Button>
-                {recording ? (
-                  <Button variant="destructive" onClick={stopRecording}>
-                    <Square />
-                    停止并生成
-                  </Button>
-                ) : (
-                  <Button onClick={() => void startRecording()} disabled={busy || replaying}>
-                    {busy ? <Loader2 className="animate-spin" /> : <Mic />}
-                    开始录制
-                  </Button>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <MiniStat label="EVENTS" value={steps.length} />
-                <MiniStat label="NODES" value={result?.dsl.nodes.length ?? 0} />
-                <MiniStat label="CONFIRM" value={needsConfirm} />
-              </div>
-            </CardContent>
-          </Card>
-
+      <div className="mt-5 flex flex-col gap-5 xl:min-h-0 xl:flex-1 xl:flex-row xl:items-stretch">
+        <div className="grid w-full min-w-0 shrink-0 content-start gap-4 xl:min-h-0 xl:w-[380px] xl:overflow-y-auto xl:pr-1">
           <Card className="gap-0 overflow-hidden">
             <CardHeader className="flex flex-row items-center justify-between border-b border-line pb-3">
               <CardTitle>录制事件</CardTitle>
@@ -789,6 +647,20 @@ export function RecordWorkbenchPage() {
                         跳过 {result.report.skipped.map((item) => `${item.type}×${item.count}`).join(" / ")}
                       </span>
                     ) : null}
+                    <div className="ml-auto flex items-center gap-1.5">
+                      {overrideCount > 0 ? (
+                        <Badge variant="amber">{overrideCount} 项微调</Badge>
+                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setTuningOpen(true)}
+                        disabled={replaying || busy}
+                      >
+                        <SlidersHorizontal />
+                        微调
+                      </Button>
+                    </div>
                   </div>
 
                   {result.report.warnings.length > 0 ? (
@@ -832,12 +704,15 @@ export function RecordWorkbenchPage() {
                         <Play className="size-3.5 text-accent" />
                         回放校验
                       </span>
-                      {replaying ? (
-                        <span className="flex items-center gap-1 font-mono text-[10px] text-accent">
-                          <Loader2 className="size-3 animate-spin" />
-                          running
-                        </span>
-                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void replay()}
+                        disabled={recording || busy || replaying}
+                      >
+                        {replaying ? <Loader2 className="animate-spin" /> : <Play />}
+                        {replaying ? "回放中…" : "开始回放"}
+                      </Button>
                     </div>
                     <p className="mt-1 text-[11px] leading-4 text-muted">{replayText}</p>
 
@@ -887,8 +762,8 @@ export function RecordWorkbenchPage() {
           </Card>
         </div>
 
-        <Card className="w-full min-w-0 gap-0 overflow-hidden xl:flex-1">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-3">
+        <Card className="flex w-full min-w-0 flex-col gap-0 overflow-hidden xl:min-h-0 xl:flex-1">
+          <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
               <CardTitle>目标系统</CardTitle>
               <Badge variant={replaying || recording ? "accent" : "secondary"}>{frameBadge}</Badge>
@@ -901,11 +776,11 @@ export function RecordWorkbenchPage() {
               ) : null}
             </div>
           </CardHeader>
-          <div className="relative">
+          <div className="relative min-h-[540px] flex-1 xl:min-h-0">
             <iframe
               ref={iframeRef}
               title="目标系统录制窗口"
-              className="h-[calc(100vh-232px)] min-h-[540px] w-full bg-white"
+              className="h-full min-h-[540px] w-full bg-white xl:min-h-0"
             />
             {!frameLoaded && !busy ? (
               <div className="pointer-events-none absolute inset-0 grid place-items-center bg-paper/75 p-8 text-center backdrop-blur-[2px]">
@@ -915,7 +790,7 @@ export function RecordWorkbenchPage() {
                   </div>
                   <h2 className="mt-3 text-[14px] font-semibold">目标系统尚未加载</h2>
                   <p className="mt-1 text-[12px] leading-5 text-muted">
-                    点「打开系统」可先登录，或直接点「开始录制」加载目标页并开始捕获操作。
+                    点右上角「开始录制」加载目标页并开始捕获操作；遇到登录页时先在窗口内完成登录，再重新开始。
                   </p>
                   {record.systemId ? (
                     <p className="mt-2 font-mono text-[10.5px] text-muted">
@@ -936,6 +811,16 @@ export function RecordWorkbenchPage() {
           </div>
         </Card>
       </div>
+
+      {result ? (
+        <NodeTuningDialog
+          open={tuningOpen}
+          dsl={result.dsl}
+          values={overrides}
+          onOpenChange={setTuningOpen}
+          onApply={applyTuning}
+        />
+      ) : null}
     </div>
   );
 }
