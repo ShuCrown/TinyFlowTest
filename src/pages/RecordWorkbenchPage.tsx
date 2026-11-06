@@ -28,6 +28,7 @@ import {
   resolveTargetUrl,
   type ProxyConfig,
 } from "@/lib/proxy";
+import { injectSystemToken } from "@/lib/session";
 import type { CellRef, FlowDsl, FlowNode } from "@/dsl/index.ts";
 import { DomRecorder } from "@/recorder/dom-recorder.ts";
 import {
@@ -137,26 +138,6 @@ function nodeLabel(node: FlowNode): string {
   if (node.type === "picker") return node.name ?? node.trigger.label ?? "复合选择";
   if (node.type === "interact") return node.name ?? node.target.label ?? node.adapter;
   return node.name ?? node.id;
-}
-
-function injectSystemToken(doc: Document, raw: string): void {
-  const clean = raw.trim().replace(/^bearer /i, "");
-  if (!clean) return;
-  try {
-    const storage = doc.defaultView?.localStorage;
-    if (!storage) return;
-    storage.setItem("token", clean);
-    storage.setItem("access_token", clean);
-    storage.setItem("Authorization", clean);
-    try {
-      const user = JSON.parse(storage.getItem("UserInfo") ?? "{}") as Record<string, unknown>;
-      storage.setItem("UserInfo", JSON.stringify({ ...user, token: clean }));
-    } catch {
-      storage.setItem("UserInfo", JSON.stringify({ token: clean }));
-    }
-  } catch {
-    // 目标页跨域时 storage 不可写，交给后续 loadFrame 的同源校验报错。
-  }
 }
 
 export function RecordWorkbenchPage() {

@@ -7,8 +7,10 @@ import type {
   JsExtractNode,
   PickerNode,
   ResponseExtractNode,
+  SignalRef,
   TargetRef,
   ValueExpr,
+  ValueLike,
 } from "../dsl/index.ts";
 import type {
   FlowCanvasNode,
@@ -19,6 +21,7 @@ import type {
   FlowRecordNode,
   OperationRecord,
 } from "../lib/types.ts";
+import { effectiveExtractName } from "./vars.ts";
 
 export class FlowCompileError extends Error {
   readonly code = "FLOW_COMPILE_INVALID";
@@ -84,10 +87,15 @@ export function compileFlow(flow: FlowItem, records: OperationRecord[]): Compile
   const systems = new Map<string, FlowDsl["systems"][number]>();
   let defaults: FlowDsl["defaults"];
 
+  const aliases = graph.varAliases ?? {};
   for (const macro of graph.nodes) {
     const build = isRecordNode(macro)
-      ? buildRecordNode(macro, recordMap, warnings)
-      : buildExtractNode(macro);
+      ? buildRecordNode(macro, recordMap, warnings, aliases)
+      : buildExtractNode(
+          macro,
+          effectiveExtractName(graph, macro.id, macro.varName),
+          aliases,
+        );
     builds.set(macro.id, build);
     nodes.push(...build.microNodes.values());
     for (const system of build.systems) systems.set(system.id, system);
@@ -111,12 +119,27 @@ export function compileFlow(flow: FlowItem, records: OperationRecord[]): Compile
   }
 
   const vars = collectManualVars(graph);
-  const extractVars: Array<{ nodeId: string; name: string; recordNodeId?: string }> = graph.nodes
-    .filter(isExtractNode)
-    .map((node) => ({
+  const extractVars: Array<{ nodeId: string; name: string; recordNodeId?: string }> = [];
+  for (const node of graph.nodes) {
+    if (!isExtractNode(node)) continue;
+    if (node.recordedDsl) {
+      for (const dslNode of node.recordedDsl.nodes) {
+        if (dslNode.type !== "extract" || dslNode.enabled === false) continue;
+        const name = effectiveExtractName(
+          graph,
+          `${node.id}::${dslNode.id}`,
+          dslNode.varName,
+        );
+        if (!name) throw new FlowCompileError(`取值节点 ${node.id} 的记录步骤缺少变量名。`);
+        extractVars.push({ nodeId: node.id, name });
+      }
+      continue;
+    }
+    extractVars.push({
       nodeId: node.id,
-      name: node.varName.trim(),
-    }));
+      name: effectiveExtractName(graph, node.id, node.varName),
+    });
+  }
   // 录制时记在操作记录内部的取值步骤，同样在流程里作为变量产出。
   for (const macro of ordered) {
     if (!isRecordNode(macro) || macro.enabled === false) continue;
@@ -124,7 +147,11 @@ export function compileFlow(flow: FlowItem, records: OperationRecord[]): Compile
     if (!record?.dsl) continue;
     for (const dslNode of record.dsl.nodes) {
       if (dslNode.type !== "extract" || dslNode.enabled === false) continue;
-      const name = dslNode.varName.trim();
+      const name = effectiveExtractName(
+        graph,
+        `${macro.id}::${dslNode.id}`,
+        dslNode.varName,
+      );
       if (!name) {
         throw new FlowCompileError(`记录「${record.name}」的取值节点缺少变量名。`);
       }
@@ -138,6 +165,7 @@ export function compileFlow(flow: FlowItem, records: OperationRecord[]): Compile
   validateVariables(graph, ordered, orderIndex, extractVars, vars);
 
   applyInjections(graph, builds, warnings);
+  rewriteVarReferences(nodes, collectVarRenames(graph, recordMap, warnings));
 
   const values: Record<string, unknown> = {};
   for (const build of builds.values()) {
@@ -174,6 +202,7 @@ function buildRecordNode(
   macro: FlowRecordNode,
   records: Map<string, OperationRecord>,
   warnings: string[],
+  aliases: Record<string, string>,
 ): MacroBuild {
   const record = records.get(macro.recordId);
   if (!record) throw new FlowCompileError(`画布节点引用了不存在的操作记录: ${macro.recordId}`);
@@ -190,6 +219,10 @@ function buildRecordNode(
     node.id = prefix + source.id;
     node.meta = { ...node.meta, flowNodeId: macro.id };
     if (macro.enabled === false) node.enabled = false;
+    if (node.type === "extract") {
+      const alias = aliases[`${macro.id}::${source.id}`]?.trim();
+      if (alias) node.varName = alias;
+    }
     microNodes.set(source.id, node);
     microIds.push(node.id);
   }
@@ -248,8 +281,15 @@ function buildRecordNode(
   };
 }
 
-function buildExtractNode(macro: FlowExtractNode): MacroBuild {
-  const varName = macro.varName.trim();
+function buildExtractNode(
+  macro: FlowExtractNode,
+  varNameInput: string,
+  aliases: Record<string, string>,
+): MacroBuild {
+  if (macro.recordedDsl && macro.recordedDsl.nodes.length > 0) {
+    return buildRecordedExtractNode(macro, macro.recordedDsl, aliases);
+  }
+  const varName = varNameInput.trim();
   if (!varName) throw new FlowCompileError(`取值节点 ${macro.id} 缺少变量名。`);
   const id = `${macro.id}::extract`;
   const pattern = macro.pattern?.trim() || undefined;
@@ -337,7 +377,11 @@ function buildExtractNode(macro: FlowExtractNode): MacroBuild {
       target = { label: varName, strategies: [{ type: "cell", cell: normalizedCell }] };
     } else {
       const selector = macro.selector.trim();
-      if (!selector) throw new FlowCompileError(`取值节点「${varName}」缺少目标选择器。`);
+      if (!selector) {
+        throw new FlowCompileError(
+          `取值节点「${varName}」还没有录制内容，请先点「录制步骤」。`,
+        );
+      }
       target = { label: varName, strategies: [{ type: "css", value: selector }] };
     }
     const attribute = macro.attribute?.trim() || undefined;
@@ -360,14 +404,93 @@ function buildExtractNode(macro: FlowExtractNode): MacroBuild {
     } satisfies DomExtractNode;
   }
 
+  const microNodes = new Map<string, FlowNode>();
+  const microIds: string[] = [];
+  const internalEdges: DslEdge[] = [];
+  let entry = id;
+  const preNodes: FlowNode[] = [];
+  const prefix = `${macro.id}::pre::`;
+  for (const source of macro.preDsl?.nodes ?? []) {
+    // 前置步骤里的取值步骤不进入节点；取值目标由当前节点自己承担。
+    if (source.type === "extract") continue;
+    const preNode = structuredClone(source) as FlowNode;
+    preNode.id = prefix + source.id;
+    preNode.meta = { ...preNode.meta, flowNodeId: macro.id };
+    if (macro.enabled === false) preNode.enabled = false;
+    microNodes.set(preNode.id, preNode);
+    microIds.push(preNode.id);
+    preNodes.push(preNode);
+  }
+  for (let index = 0; index < preNodes.length - 1; index += 1) {
+    internalEdges.push({ from: preNodes[index]!.id, to: preNodes[index + 1]!.id });
+  }
+  if (preNodes.length > 0) {
+    internalEdges.push({ from: preNodes[preNodes.length - 1]!.id, to: id });
+    entry = preNodes[0]!.id;
+  }
+  microNodes.set(id, node);
+  microIds.push(id);
+
   return {
     macro,
-    entry: id,
+    entry,
     exits: [id],
-    microIds: [id],
-    microNodes: new Map([[id, node]]),
-    internalEdges: [],
-    systems: [],
+    microIds,
+    microNodes,
+    internalEdges,
+    systems: macro.preDsl?.systems ?? [],
+    values: {},
+  };
+}
+
+/** 录制型取值节点：整段录制（含多个取值步骤）展开成宏内部微节点。 */
+function buildRecordedExtractNode(
+  macro: FlowExtractNode,
+  dsl: FlowDsl,
+  aliases: Record<string, string>,
+): MacroBuild {
+  const prefix = `${macro.id}::rec::`;
+  const microNodes = new Map<string, FlowNode>();
+  const microIds: string[] = [];
+  for (const source of dsl.nodes) {
+    const node = structuredClone(source) as FlowNode;
+    node.id = prefix + source.id;
+    node.meta = { ...node.meta, flowNodeId: macro.id };
+    if (macro.enabled === false) node.enabled = false;
+    if (node.type === "extract") {
+      const alias = aliases[`${macro.id}::${source.id}`]?.trim();
+      if (alias) node.varName = alias;
+    }
+    microNodes.set(node.id, node);
+    microIds.push(node.id);
+  }
+  const internalEdges =
+    dsl.edges.length > 0
+      ? dsl.edges.map((edge) => ({
+          ...edge,
+          from: prefix + edge.from,
+          to: prefix + edge.to,
+        }))
+      : dsl.nodes.slice(0, -1).map((node, index) => ({
+          from: prefix + node.id,
+          to: prefix + dsl.nodes[index + 1]!.id,
+        }));
+  const outSet = new Set(dsl.edges.map((edge) => edge.from));
+  const exits =
+    dsl.edges.length > 0
+      ? dsl.nodes.filter((node) => !outSet.has(node.id)).map((node) => prefix + node.id)
+      : [prefix + dsl.nodes[dsl.nodes.length - 1]!.id];
+  const entry = microNodes.has(prefix + dsl.entry)
+    ? prefix + dsl.entry
+    : prefix + dsl.nodes[0]!.id;
+  return {
+    macro,
+    entry,
+    exits: exits.length > 0 ? exits : [entry],
+    microIds,
+    microNodes,
+    internalEdges,
+    systems: dsl.systems,
     values: {},
   };
 }
@@ -472,7 +595,7 @@ function validateVariables(
     if (!item.name) throw new FlowCompileError("取值节点缺少变量名。");
     if (producers.has(item.name)) {
       throw new FlowCompileError(
-        `环境变量重复产出: ${item.name}（画布取值与记录内取值只能有一个同名变量，请在录制页重命名）`,
+        `环境变量重复产出: ${item.name}（画布取值与记录内取值只能有一个同名变量，可在流程 ENV 面板改名）`,
       );
     }
     const producerIndex = item.recordNodeId
@@ -587,4 +710,184 @@ function rewritePick(pick: PickerNode["pick"], expr: ValueExpr): PickerNode["pic
     firstVisible: { on },
     values: undefined,
   };
+}
+
+/** 旧变量名 → 流程别名；同一旧名有多个目标时不做模板重写。 */
+function collectVarRenames(
+  graph: FlowGraph,
+  records: Map<string, OperationRecord>,
+  warnings: string[],
+): Map<string, string> {
+  const aliases = graph.varAliases ?? {};
+  const bucket = new Map<string, Set<string>>();
+  const producerCounts = new Map<string, number>();
+  const add = (key: string, recordedName: string): void => {
+    const from = recordedName.trim();
+    if (!from) return;
+    producerCounts.set(from, (producerCounts.get(from) ?? 0) + 1);
+    const to = aliases[key]?.trim() ?? "";
+    if (!to || from === to) return;
+    const targets = bucket.get(from) ?? new Set<string>();
+    targets.add(to);
+    bucket.set(from, targets);
+  };
+  for (const node of graph.nodes) {
+    if (node.kind === "extract") {
+      if (node.recordedDsl) {
+        for (const dslNode of node.recordedDsl.nodes) {
+          if (dslNode.type === "extract") {
+            add(`${node.id}::${dslNode.id}`, dslNode.varName);
+          }
+        }
+      } else {
+        add(node.id, node.varName);
+      }
+      continue;
+    }
+    const record = records.get(node.recordId);
+    for (const dslNode of record?.dsl?.nodes ?? []) {
+      if (dslNode.type === "extract") {
+        add(`${node.id}::${dslNode.id}`, dslNode.varName);
+      }
+    }
+  }
+  const renames = new Map<string, string>();
+  for (const [from, targets] of bucket) {
+    const unique = targets.size === 1 ? [...targets][0]! : "";
+    if (unique && producerCounts.get(from) === 1) renames.set(from, unique);
+    else warnings.push(`变量 ${from} 有多个产出或改名目标，模板引用未自动更新，请手工确认。`);
+  }
+  return renames;
+}
+
+/** 别名只在编译产物上生效：把节点里的 {{旧名}} / var 引用统一换成新名。 */
+function rewriteVarReferences(nodes: FlowNode[], renames: Map<string, string>): void {
+  if (renames.size === 0) return;
+  const patterns = [...renames.entries()].map(([from, to]) => ({
+    regex: new RegExp(`\\{\\{\\s*${escapeRegExp(from)}\\s*\\}\\}`, "g"),
+    to,
+  }));
+  const rewriteText = (text: string): string => {
+    let next = text;
+    for (const item of patterns) next = next.replace(item.regex, `{{${item.to}}}`);
+    return next;
+  };
+  const rewriteValue = (value: ValueLike | undefined): ValueLike | undefined => {
+    if (typeof value === "string") return rewriteText(value);
+    if (!value || typeof value !== "object" || Array.isArray(value) || !("kind" in value)) {
+      return value;
+    }
+    const expr = value as ValueExpr;
+    if (expr.kind === "var") {
+      const next = renames.get(expr.name);
+      return next ? { kind: "var", name: next } : value;
+    }
+    if (expr.kind === "template") {
+      return { kind: "template", template: rewriteText(expr.template) };
+    }
+    return value;
+  };
+  const rewriteTarget = (target: TargetRef | undefined): TargetRef | undefined => {
+    if (!target) return target;
+    let changed = false;
+    const strategies = target.strategies.map((strategy) => {
+      if (strategy.type !== "cell") return strategy;
+      const rowValue =
+        strategy.cell.rowValue !== undefined
+          ? rewriteText(strategy.cell.rowValue)
+          : undefined;
+      const rowText =
+        strategy.cell.rowText !== undefined ? rewriteText(strategy.cell.rowText) : undefined;
+      if (rowValue === strategy.cell.rowValue && rowText === strategy.cell.rowText) {
+        return strategy;
+      }
+      changed = true;
+      return { ...strategy, cell: { ...strategy.cell, rowValue, rowText } };
+    });
+    const scope = rewriteTarget(target.scope);
+    if (scope !== target.scope) changed = true;
+    return changed ? { ...target, strategies, scope } : target;
+  };
+  const rewriteSignal = (signal: SignalRef): SignalRef => {
+    if (typeof signal === "string") return signal;
+    switch (signal.kind) {
+      case "visible":
+      case "hidden":
+      case "attached":
+      case "enabled":
+        return { ...signal, target: rewriteTarget(signal.target)! };
+      case "count":
+        return { ...signal, target: rewriteTarget(signal.target)! };
+      case "text":
+        return {
+          ...signal,
+          target: rewriteTarget(signal.target)!,
+          equals: rewriteValue(signal.equals),
+        };
+      case "domStable":
+        return { ...signal, target: rewriteTarget(signal.target) };
+      case "url":
+        return signal;
+    }
+  };
+  const rewriteSignals = (signals: SignalRef[] | undefined): SignalRef[] | undefined =>
+    signals?.map(rewriteSignal);
+
+  for (const node of nodes) {
+    node.pre = rewriteSignals(node.pre);
+    node.expect = rewriteSignals(node.expect);
+    switch (node.type) {
+      case "navigate":
+        node.readySignal = node.readySignal ? rewriteSignal(node.readySignal) : undefined;
+        break;
+      case "interact":
+        node.target = rewriteTarget(node.target)!;
+        node.value = rewriteValue(node.value);
+        break;
+      case "picker":
+        node.trigger = rewriteTarget(node.trigger)!;
+        if (node.panel.scope.target) {
+          node.panel.scope.target = rewriteTarget(node.panel.scope.target);
+        }
+        if (node.filter) {
+          node.filter.steps = node.filter.steps.map((step) => ({
+            ...step,
+            target: rewriteTarget(step.target)!,
+            value: rewriteValue(step.value),
+          }));
+        }
+        if (node.pick.byText) {
+          node.pick.byText.value = rewriteValue(node.pick.byText.value);
+        }
+        if (node.pick.byRow) {
+          node.pick.byRow.keyValue = rewriteValue(node.pick.byRow.keyValue);
+          if (node.pick.byRow.clickTarget) {
+            node.pick.byRow.clickTarget = rewriteTarget(node.pick.byRow.clickTarget);
+          }
+        }
+        if (node.commit) node.commit.target = rewriteTarget(node.commit.target)!;
+        break;
+      case "wait":
+        node.condition = rewriteSignal(node.condition);
+        break;
+      case "extract":
+        if (node.source === "response") {
+          node.response = {
+            ...node.response,
+            urlContains: rewriteText(node.response.urlContains),
+            bodyContains:
+              node.response.bodyContains !== undefined
+                ? rewriteText(node.response.bodyContains)
+                : undefined,
+          };
+        } else if (node.source !== "js") {
+          node.target = rewriteTarget(node.target)!;
+        }
+        break;
+    }
+  }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

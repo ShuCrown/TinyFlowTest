@@ -30,12 +30,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type {
+  ExtractNode,
   FlowDsl,
   InteractNode,
   PickerFilterStep,
   PickerNode,
   ValueLike,
 } from "@/dsl/index.ts";
+import {
+  ExtractTuningFields,
+  extractEditorOf,
+  extractTuningDiff,
+  recordedExtractEditor,
+  type ExtractEditor,
+} from "@/components/ExtractTuningFields";
 
 export type TuningValues = Record<string, unknown>;
 
@@ -59,6 +67,7 @@ interface PickerEditor {
   /** 切回文本模式时恢复的定位方式：录制时按行选择则保持按行。 */
   textStrategy: "byText" | "byRow";
 }
+
 
 const EDITABLE_ADAPTER = new Set(["input", "select", "nativeSelect", "check"]);
 
@@ -139,10 +148,16 @@ function nodeLabel(node: PickerNode): string {
 function buildEditors(dsl: FlowDsl, values: TuningValues): {
   interact: Record<string, InteractEditor>;
   picker: Record<string, PickerEditor>;
+  extract: Record<string, ExtractEditor>;
 } {
   const interact: Record<string, InteractEditor> = {};
   const picker: Record<string, PickerEditor> = {};
+  const extract: Record<string, ExtractEditor> = {};
   for (const node of dsl.nodes) {
+    if (node.type === "extract") {
+      extract[node.id] = extractEditorOf(node, values[node.id]);
+      continue;
+    }
     if (node.type === "interact") {
       if (!EDITABLE_ADAPTER.has(node.adapter)) continue;
       const override = values[node.id];
@@ -178,7 +193,7 @@ function buildEditors(dsl: FlowDsl, values: TuningValues): {
       textStrategy: textStrategyOf(node),
     };
   }
-  return { interact, picker };
+  return { interact, picker, extract };
 }
 
 function NodeTuningDialog({
@@ -190,9 +205,13 @@ function NodeTuningDialog({
 }: NodeTuningDialogProps) {
   const [interactEditors, setInteractEditors] = useState<Record<string, InteractEditor>>({});
   const [pickerEditors, setPickerEditors] = useState<Record<string, PickerEditor>>({});
+  const [extractEditors, setExtractEditors] = useState<Record<string, ExtractEditor>>({});
   const [error, setError] = useState("");
   const hasTunable = dsl.nodes.some(
-    (node) => (node.type === "interact" && EDITABLE_ADAPTER.has(node.adapter)) || node.type === "picker",
+    (node) =>
+      (node.type === "interact" && EDITABLE_ADAPTER.has(node.adapter)) ||
+      node.type === "picker" ||
+      node.type === "extract",
   );
 
   useEffect(() => {
@@ -200,6 +219,7 @@ function NodeTuningDialog({
     const next = buildEditors(dsl, values);
     setInteractEditors(next.interact);
     setPickerEditors(next.picker);
+    setExtractEditors(next.extract);
     setError("");
   }, [open, dsl, values]);
 
@@ -211,10 +231,15 @@ function NodeTuningDialog({
     });
   };
 
+  const patchExtract = (nodeId: string, next: ExtractEditor): void => {
+    setExtractEditors((prev) => ({ ...prev, [nodeId]: next }));
+  };
+
   const resetAll = (): void => {
     const next = buildEditors(dsl, {});
     setInteractEditors(next.interact);
     setPickerEditors(next.picker);
+    setExtractEditors(next.extract);
     setError("");
   };
 
@@ -231,6 +256,17 @@ function NodeTuningDialog({
         } else if (editor.value !== recordedText(node)) {
           nextValues[node.id] = editor.value;
         }
+        return node;
+      }
+      if (node.type === "extract") {
+        const editor = extractEditors[node.id];
+        if (!editor) return node;
+        const diff = extractTuningDiff(editor, recordedExtractEditor(node));
+        if (diff.error) {
+          problem = diff.error;
+          return node;
+        }
+        if (diff.tuning) nextValues[node.id] = diff.tuning;
         return node;
       }
       if (node.type !== "picker") return node;
@@ -306,7 +342,7 @@ function NodeTuningDialog({
 
           {!hasTunable ? (
             <p className="px-5 py-8 text-center text-[12px] text-muted">
-              当前流程没有可微调的输入值，可直接回放。
+              当前流程没有可微调的输入值或取值配置，可直接回放。
             </p>
           ) : (
             <Table>
@@ -387,6 +423,64 @@ function NodeTuningDialog({
                                     : { kind: "text", value: recordedText(node) },
                               }));
                             }}
+                          >
+                            <RotateCcw className="size-3.5" />
+                            恢复
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
+
+                  if (node.type === "extract") {
+                    const editor = extractEditors[node.id];
+                    if (!editor) return null;
+                    return (
+                      <TableRow key={node.id}>
+                        <TableCell className="align-top font-mono text-[10px] text-muted">
+                          {String(nodeIndex + 1).padStart(2, "0")}
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <div className="text-[12px] font-medium">
+                            {node.source === "response" || node.source === "js"
+                              ? (node.name ?? node.varName ?? node.id)
+                              : (node.target.label ?? node.name ?? node.varName ?? node.id)}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            <Badge variant="outline">取值</Badge>
+                            <Badge variant="secondary">
+                              {editor.source === "response"
+                                ? "接口"
+                                : editor.source === "js"
+                                  ? "JS"
+                                  : editor.locate === "cell"
+                                    ? "表格"
+                                    : "DOM"}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 truncate font-mono text-[10px] text-muted">
+                            变量 {node.varName || "未命名"}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top text-[11.5px] text-muted">
+                          取值配置
+                          <div className="text-[10px] leading-4 text-muted/80">
+                            变量名在流程画布 ENV 面板改
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-2 align-top">
+                          <ExtractTuningFields
+                            editor={editor}
+                            onChange={(next) => patchExtract(node.id, next)}
+                          />
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="恢复录制值"
+                            aria-label="恢复取值配置"
+                            onClick={() => patchExtract(node.id, recordedExtractEditor(node))}
                           >
                             <RotateCcw className="size-3.5" />
                             恢复

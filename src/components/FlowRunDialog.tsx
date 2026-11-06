@@ -40,11 +40,20 @@ import {
   resolveTargetUrl,
   type ProxyConfig,
 } from "@/lib/proxy";
+import { injectSystemToken } from "@/lib/session";
 import { compileFlow } from "@/flow/compile.ts";
 import { createIframeHost, runFlow, type ReplayNodeStatus } from "@/replay/index.ts";
 import type { NodeFailureDecision, NodeFailureInfo } from "@/replay/index.ts";
-import type { InteractNode, PickerNode, ValueLike } from "@/dsl/index.ts";
+import type { ExtractNode, InteractNode, PickerNode, ValueLike } from "@/dsl/index.ts";
 import type { FlowItem, OperationRecord } from "@/lib/types";
+import { effectiveExtractName } from "@/flow/vars";
+import {
+  ExtractTuningFields,
+  extractEditorOf,
+  extractTuningDiff,
+  recordedExtractEditor,
+  type ExtractEditor,
+} from "@/components/ExtractTuningFields";
 
 type RunPhase =
   | "idle"
@@ -77,7 +86,7 @@ interface PickerDraft {
 
 interface TunableNode {
   microId: string;
-  node: InteractNode | PickerNode;
+  node: InteractNode | PickerNode | ExtractNode;
 }
 
 interface TuningGroup {
@@ -189,26 +198,6 @@ function interactDefaultText(node: InteractNode): string {
     : literalText(node.value);
 }
 
-function injectSystemToken(doc: Document, raw: string): void {
-  const clean = raw.trim().replace(/^bearer /i, "");
-  if (!clean) return;
-  try {
-    const storage = doc.defaultView?.localStorage;
-    if (!storage) return;
-    storage.setItem("token", clean);
-    storage.setItem("access_token", clean);
-    storage.setItem("Authorization", clean);
-    try {
-      const user = JSON.parse(storage.getItem("UserInfo") ?? "{}") as Record<string, unknown>;
-      storage.setItem("UserInfo", JSON.stringify({ ...user, token: clean }));
-    } catch {
-      storage.setItem("UserInfo", JSON.stringify({ token: clean }));
-    }
-  } catch {
-    // 跨域时写入失败，后续加载同源校验会给出明确错误。
-  }
-}
-
 function loadFrame(frame: HTMLIFrameElement, source: string): Promise<Document> {
   return new Promise<Document>((resolve, reject) => {
     let settled = false;
@@ -265,6 +254,7 @@ export function FlowRunDialog({
   const [asideTab, setAsideTab] = useState<"run" | "tune">("run");
   const [inputTuning, setInputTuning] = useState<Record<string, string>>({});
   const [pickerTuning, setPickerTuning] = useState<Record<string, PickerDraft>>({});
+  const [extractTuning, setExtractTuning] = useState<Record<string, ExtractEditor>>({});
 
   const recordMap = useMemo(() => new Map(records.map((record) => [record.id, record])), [records]);
   const compiledState = useMemo(() => {
@@ -288,7 +278,8 @@ export function FlowRunDialog({
       if (node.kind === "record") {
         labels.set(node.id, recordMap.get(node.recordId)?.name ?? "记录已删除");
       } else {
-        labels.set(node.id, `取值 ${node.varName || "未命名"}`);
+        const name = effectiveExtractName(flow.graph, node.id, node.varName);
+        labels.set(node.id, `取值 ${name || "未命名"}`);
       }
     }
     return labels;
@@ -316,9 +307,28 @@ export function FlowRunDialog({
       if (node.type === "interact") {
         if (!EDITABLE_INTERACT.has(node.adapter)) continue;
         group.nodes.push({ microId: node.id, node });
-      } else if (node.type === "picker") {
+      } else if (node.type === "picker" || node.type === "extract") {
         group.nodes.push({ microId: node.id, node });
       }
+    }
+    for (const node of flow.graph?.nodes ?? []) {
+      if (node.kind !== "extract") continue;
+      const tunable = dsl.nodes.filter(
+        (item): item is InteractNode | PickerNode | ExtractNode =>
+          item.meta?.flowNodeId === node.id &&
+          ((item.type === "interact" && EDITABLE_INTERACT.has(item.adapter)) ||
+            item.type === "picker" ||
+            item.type === "extract"),
+      );
+      if (tunable.length === 0) continue;
+      const primary = tunable.find((item): item is ExtractNode => item.type === "extract");
+      const name =
+        primary?.varName || effectiveExtractName(flow.graph, node.id, node.varName);
+      groups.push({
+        macroId: node.id,
+        recordName: `取值 ${name || "未命名"}`,
+        nodes: tunable.map((item) => ({ microId: item.id, node: item })),
+      });
     }
     return groups;
   }, [compiledState.value, flow.graph, recordMap]);
@@ -347,6 +357,19 @@ export function FlowRunDialog({
     setPickerTuning((current) => ({ ...current, [microNodeId]: next }));
     const runtime = runtimeValuesRef.current;
     if (runtime) runtime[microNodeId] = pickerOverrideOf(next);
+  };
+
+  const patchExtractTuning = (
+    microNodeId: string,
+    node: ExtractNode,
+    editor: ExtractEditor,
+  ): void => {
+    setExtractTuning((current) => ({ ...current, [microNodeId]: editor }));
+    const runtime = runtimeValuesRef.current;
+    if (!runtime) return;
+    const diff = extractTuningDiff(editor, recordedExtractEditor(node)).tuning;
+    if (diff) runtime[microNodeId] = diff;
+    else delete runtime[microNodeId];
   };
 
   const reset = (): void => {
@@ -426,11 +449,6 @@ export function FlowRunDialog({
 
   const start = async (): Promise<void> => {
     if (phase === "running" || phase === "loading" || phase === "paused") return;
-    if (!firstRecord) {
-      setPhase("failed");
-      setStatusText("流程里还没有操作记录节点，无法确定目标页。");
-      return;
-    }
     const frame = frameRef.current;
     if (!frame) return;
 
@@ -445,29 +463,36 @@ export function FlowRunDialog({
       setStatusText(compiledState.error ?? "画布编译失败。");
       return;
     }
+    if (!firstRecord && !compiled.dsl.nodes.some((node) => node.type === "navigate")) {
+      setPhase("failed");
+      setStatusText("流程里没有操作记录或导航步骤，无法确定目标页。");
+      return;
+    }
 
     try {
-      const config = proxyConfig ?? (await loadProxyConfig());
-      setProxyConfig(config);
-      const resolved = resolveTargetUrl(firstRecord.targetUrl, config);
-      if (!resolved) throw new Error(describeTargetFailure(config, ""));
+      const config = firstRecord ? (proxyConfig ?? (await loadProxyConfig())) : proxyConfig;
+      if (config) setProxyConfig(config);
+      if (firstRecord) {
+        const resolved = resolveTargetUrl(firstRecord.targetUrl, config);
+        if (!resolved) throw new Error(describeTargetFailure(config, ""));
 
-      let doc = await loadFrame(frame, resolved.url.toString());
-      const token = firstRecord.systemId ? getSystemToken(firstRecord.systemId) : "";
-      if (resolved.viaProxy && token.trim()) {
-        injectSystemToken(doc, token);
-        doc = await loadFrame(frame, resolved.url.toString());
-      }
-      if (doc.querySelector('input[type="password"]')) {
-        setPhase("login");
-        setStatusText("检测到登录页：请先在右侧完成登录，再点「开始运行」。");
-        return;
-      }
-      if (firstRecord.systemId) saveSystemToken(firstRecord.systemId, token);
-      try {
-        setFrameUrl(frame.contentWindow?.location.href ?? "");
-      } catch {
-        setFrameUrl("");
+        let doc = await loadFrame(frame, resolved.url.toString());
+        const token = firstRecord.systemId ? getSystemToken(firstRecord.systemId) : "";
+        if (resolved.viaProxy && token.trim()) {
+          injectSystemToken(doc, token);
+          doc = await loadFrame(frame, resolved.url.toString());
+        }
+        if (doc.querySelector('input[type="password"]')) {
+          setPhase("login");
+          setStatusText("检测到登录页：请先在右侧完成登录，再点「开始运行」。");
+          return;
+        }
+        if (firstRecord.systemId) saveSystemToken(firstRecord.systemId, token);
+        try {
+          setFrameUrl(frame.contentWindow?.location.href ?? "");
+        } catch {
+          setFrameUrl("");
+        }
       }
 
       const host = createIframeHost(frame);
@@ -491,6 +516,15 @@ export function FlowRunDialog({
       }
       for (const [microNodeId, draft] of Object.entries(pickerTuning)) {
         runValues[microNodeId] = pickerOverrideOf(draft);
+      }
+      for (const [microNodeId, editor] of Object.entries(extractTuning)) {
+        const node = compiled.dsl.nodes.find(
+          (item) => item.id === microNodeId && item.type === "extract",
+        );
+        if (!node || node.type !== "extract") continue;
+        const diff = extractTuningDiff(editor, recordedExtractEditor(node)).tuning;
+        if (diff) runValues[microNodeId] = diff;
+        else delete runValues[microNodeId];
       }
       runtimeValuesRef.current = runValues;
       const result = await runFlow({
@@ -623,7 +657,10 @@ export function FlowRunDialog({
     }
   };
 
-  const tunedCount = Object.keys(inputTuning).length + Object.keys(pickerTuning).length;
+  const tunedCount =
+    Object.keys(inputTuning).length +
+    Object.keys(pickerTuning).length +
+    Object.keys(extractTuning).length;
   const active =
     phase === "running" || phase === "loading" || phase === "paused" || phase === "intervening";
   const phaseVariant =
@@ -776,8 +813,11 @@ export function FlowRunDialog({
                   items={items}
                   inputValues={inputTuning}
                   pickerValues={pickerTuning}
+                  extractValues={extractTuning}
+                  valueOverrides={compiledState.value?.values ?? {}}
                   onInputChange={setInputTuningValue}
                   onPickerChange={patchPickerTuning}
+                  onExtractChange={patchExtractTuning}
                 />
               ) : (
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
@@ -876,15 +916,21 @@ function TuningPanel({
   items,
   inputValues,
   pickerValues,
+  extractValues,
+  valueOverrides,
   onInputChange,
   onPickerChange,
+  onExtractChange,
 }: {
   groups: TuningGroup[];
   items: RunItem[];
   inputValues: Record<string, string>;
   pickerValues: Record<string, PickerDraft>;
+  extractValues: Record<string, ExtractEditor>;
+  valueOverrides: Record<string, unknown>;
   onInputChange: (microNodeId: string, value: string) => void;
   onPickerChange: (microNodeId: string, node: PickerNode, patch: Partial<PickerDraft>) => void;
+  onExtractChange: (microNodeId: string, node: ExtractNode, editor: ExtractEditor) => void;
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -968,7 +1014,7 @@ function TuningPanel({
                           disabled={finished}
                           onChange={onInputChange}
                         />
-                      ) : (
+                      ) : item.node.type === "picker" ? (
                         <PickerTuningRows
                           key={item.microId}
                           node={item.node}
@@ -977,6 +1023,19 @@ function TuningPanel({
                           draft={pickerValues[item.microId] ?? defaultPickerDraft(item.node)}
                           disabled={finished}
                           onChange={onPickerChange}
+                        />
+                      ) : (
+                        <ExtractTuningRows
+                          key={item.microId}
+                          node={item.node}
+                          microId={item.microId}
+                          nodeIndex={nodeIndex}
+                          editor={
+                            extractValues[item.microId] ??
+                            extractEditorOf(item.node, valueOverrides[item.microId])
+                          }
+                          disabled={finished}
+                          onChange={onExtractChange}
                         />
                       ),
                     )
@@ -1061,6 +1120,71 @@ function InteractTuningRows({
           aria-label="恢复录制值"
           disabled={disabled}
           onClick={() => onChange(microId, "")}
+        >
+          <RotateCcw className="size-3.5" />
+          恢复
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function ExtractTuningRows({
+  node,
+  microId,
+  nodeIndex,
+  editor,
+  disabled,
+  onChange,
+}: {
+  node: ExtractNode;
+  microId: string;
+  nodeIndex: number;
+  editor: ExtractEditor;
+  disabled: boolean;
+  onChange: (microNodeId: string, node: ExtractNode, editor: ExtractEditor) => void;
+}) {
+  const label =
+    node.source === "response" || node.source === "js"
+      ? (node.name ?? node.varName ?? node.id)
+      : (node.target.label ?? node.name ?? node.varName ?? node.id);
+  const sourceLabel =
+    editor.source === "response" ? "接口" : editor.source === "js" ? "JS" : "DOM";
+
+  return (
+    <TableRow>
+      <TableCell className="px-2 py-1.5 font-mono text-[9.5px] text-muted">
+        {String(nodeIndex + 1).padStart(2, "0")}
+      </TableCell>
+      <TableCell className="px-2 py-1.5">
+        <div className="truncate text-[11px] font-medium">{label}</div>
+        <div className="mt-0.5 flex flex-wrap gap-1">
+          <Badge variant="secondary">取值</Badge>
+          <Badge variant="outline">{sourceLabel}</Badge>
+        </div>
+        <div className="mt-0.5 truncate font-mono text-[9.5px] text-muted">
+          {node.varName || "未命名"}
+        </div>
+      </TableCell>
+      <TableCell className="px-2 py-1.5 text-[10px] leading-4 text-muted">
+        取值配置
+      </TableCell>
+      <TableCell className="px-2 py-1.5">
+        <fieldset disabled={disabled} className="min-w-0">
+          <ExtractTuningFields
+            editor={editor}
+            onChange={(next) => onChange(microId, node, next)}
+          />
+        </fieldset>
+      </TableCell>
+      <TableCell className="px-1 py-1.5">
+        <Button
+          size="sm"
+          variant="ghost"
+          title="恢复录制值"
+          aria-label="恢复取值配置"
+          disabled={disabled}
+          onClick={() => onChange(microId, node, recordedExtractEditor(node))}
         >
           <RotateCcw className="size-3.5" />
           恢复

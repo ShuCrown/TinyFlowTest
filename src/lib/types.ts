@@ -77,12 +77,38 @@ export interface FlowExtractNode {
   response?: ExtractResponseConfig;
   /** source=js 时在目标页上下文执行的表达式。 */
   js?: string;
+  /** 弹窗录制的点击/输入步骤，执行完这些步骤后再取值；不含取值步骤本身。 */
+  preDsl?: FlowDsl;
+  /** 完整录制：包含操作和所有取值步骤；有值时按它展开，忽略单步配置。 */
+  recordedDsl?: FlowDsl;
+  /** 录制使用的系统，重新录制时预选。 */
+  systemId?: string;
   enabled?: boolean;
   x: number;
   y: number;
 }
 
 export type FlowCanvasNode = FlowRecordNode | FlowExtractNode;
+
+/** 取值步骤的回放期覆盖；只影响回放，不改录制 DSL。 */
+export interface ExtractTuning {
+  read?: ExtractRead;
+  attribute?: string;
+  pattern?: string;
+  /** DOM 来源的行匹配方式，三选一。 */
+  cell?:
+    | { mode: "rowValue"; rowValue: string }
+    | { mode: "rowText"; rowText: string }
+    | { mode: "rowIndex"; rowIndex: number };
+  /** 接口来源的匹配与取值覆盖。 */
+  response?: {
+    urlContains?: string;
+    bodyContains?: string;
+    path?: string;
+  };
+  /** JS 来源的表达式覆盖。 */
+  js?: string;
+}
 
 export interface FlowEdge {
   from: string;
@@ -115,6 +141,11 @@ export interface FlowGraph {
   edges: FlowEdge[];
   injections: FlowInjection[];
   vars: FlowEnvVar[];
+  /**
+   * 取值变量的流程级别名。key 为画布取值节点 id，
+   * 或记录内取值步骤的 `${macroNodeId}::${dslNodeId}`。
+   */
+  varAliases?: Record<string, string>;
 }
 
 export interface FlowItem {

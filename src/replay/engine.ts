@@ -16,6 +16,8 @@ import type {
   WaitNode,
   WaitSignal,
 } from "../dsl/index.ts";
+import type { ExtractTuning } from "../lib/types.ts";
+import { readExtractTuning } from "../flow/extract-tuning.ts";
 import { describeJsonKeys, jsonValueText, pickJsonPath } from "./json-path.ts";
 import {
   isGeneratedId,
@@ -1055,9 +1057,11 @@ async function executeWait(
 
 async function executeExtract(
   context: ExecuteContext,
-  node: ExtractNode,
+  sourceNode: ExtractNode,
   timeoutMs: number,
 ): Promise<NodeOutcome> {
+  const tuning = readExtractTuning(context.values[sourceNode.id]);
+  const node = tuning ? applyExtractTuning(sourceNode, tuning) : sourceNode;
   let strategy: string | undefined;
   let healed = false;
   let raw: string;
@@ -1096,6 +1100,59 @@ async function executeExtract(
     message: `取值 ${node.varName} = ${JSON.stringify(value)}`,
     strategy,
     healed,
+  };
+}
+
+function applyExtractTuning(node: ExtractNode, tuning: ExtractTuning): ExtractNode {
+  const pattern =
+    tuning.pattern !== undefined ? tuning.pattern || undefined : node.pattern;
+  if (node.source === "response") {
+    return {
+      ...node,
+      response: {
+        ...node.response,
+        ...(tuning.response?.urlContains !== undefined
+          ? { urlContains: tuning.response.urlContains }
+          : {}),
+        ...(tuning.response?.bodyContains !== undefined
+          ? { bodyContains: tuning.response.bodyContains }
+          : {}),
+        ...(tuning.response?.path !== undefined ? { path: tuning.response.path } : {}),
+      },
+      pattern,
+    };
+  }
+  if (node.source === "js") {
+    return {
+      ...node,
+      js: tuning.js !== undefined ? tuning.js : node.js,
+      pattern,
+    };
+  }
+  let target = node.target;
+  if (tuning.cell) {
+    const tuned = tuning.cell;
+    target = {
+      ...target,
+      strategies: target.strategies.map((strategy) => {
+        if (strategy.type !== "cell") return strategy;
+        const cell = { ...strategy.cell };
+        delete cell.rowValue;
+        delete cell.rowText;
+        delete cell.rowIndex;
+        if (tuned.mode === "rowIndex") cell.rowIndex = tuned.rowIndex;
+        else if (tuned.mode === "rowText") cell.rowText = tuned.rowText;
+        else cell.rowValue = tuned.rowValue;
+        return { ...strategy, cell };
+      }),
+    };
+  }
+  return {
+    ...node,
+    target,
+    read: tuning.read ?? node.read,
+    ...(tuning.attribute !== undefined ? { attribute: tuning.attribute } : {}),
+    pattern,
   };
 }
 
