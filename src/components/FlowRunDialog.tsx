@@ -463,12 +463,6 @@ export function FlowRunDialog({
       setStatusText(compiledState.error ?? "画布编译失败。");
       return;
     }
-    if (!firstRecord && !compiled.dsl.nodes.some((node) => node.type === "navigate")) {
-      setPhase("failed");
-      setStatusText("流程里没有操作记录或导航步骤，无法确定目标页。");
-      return;
-    }
-
     try {
       const config = firstRecord ? (proxyConfig ?? (await loadProxyConfig())) : proxyConfig;
       if (config) setProxyConfig(config);
@@ -1145,11 +1139,17 @@ function ExtractTuningRows({
   onChange: (microNodeId: string, node: ExtractNode, editor: ExtractEditor) => void;
 }) {
   const label =
-    node.source === "response" || node.source === "js"
+    node.source === "response" || node.source === "js" || node.source === "const"
       ? (node.name ?? node.varName ?? node.id)
       : (node.target.label ?? node.name ?? node.varName ?? node.id);
   const sourceLabel =
-    editor.source === "response" ? "接口" : editor.source === "js" ? "JS" : "DOM";
+    editor.source === "response"
+      ? "接口"
+      : editor.source === "js"
+        ? "JS"
+        : editor.source === "const"
+          ? "手动"
+          : "DOM";
 
   return (
     <TableRow>

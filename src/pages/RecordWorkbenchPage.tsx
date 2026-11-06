@@ -369,7 +369,13 @@ export function RecordWorkbenchPage() {
       let changed = false;
       const nodes = prev.dsl.nodes.map((node) => {
         if (node.type !== "extract" || node.meta?.sourceIndex !== index) return node;
-        if (node.source === "response" || node.source === "js") return node;
+        if (
+          node.source === "response" ||
+          node.source === "js" ||
+          node.source === "const"
+        ) {
+          return node;
+        }
         changed = true;
         const strategies = cell
           ? node.target.strategies.map((strategy) =>
@@ -940,6 +946,9 @@ export function RecordWorkbenchPage() {
                       </Button>
                     </div>
                     <p className="mt-1 text-[11px] leading-4 text-muted">{replayText}</p>
+                    <p className="mt-1 text-[10.5px] leading-4 text-muted">
+                      单条记录回放使用录制值/微调值；流程里的环境变量注入请在流程画布点「运行流程」。
+                    </p>
 
                     {runItems.length > 0 ? (
                       <ol className="mt-2 max-h-[190px] divide-y divide-line overflow-y-auto rounded-lg border border-line bg-white">

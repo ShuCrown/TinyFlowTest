@@ -27,16 +27,29 @@ export type ExtractEditor =
       source: "js";
       js: string;
       pattern: string;
+    }
+  | {
+      source: "const";
+      value: string;
     };
 
 function domCellOf(node: ExtractNode): CellRef | undefined {
-  if (node.source === "response" || node.source === "js") return undefined;
+  if (
+    node.source === "response" ||
+    node.source === "js" ||
+    node.source === "const"
+  ) {
+    return undefined;
+  }
   const strategy = node.target.strategies.find((item) => item.type === "cell");
   return strategy?.type === "cell" ? strategy.cell : undefined;
 }
 
 export function recordedExtractEditor(node: ExtractNode): ExtractEditor {
   const pattern = node.pattern ?? "";
+  if (node.source === "const") {
+    return { source: "const", value: node.value };
+  }
   if (node.source === "response") {
     return {
       source: "response",
@@ -77,6 +90,12 @@ export function extractEditorOf(node: ExtractNode, override: unknown): ExtractEd
   const editor = recordedExtractEditor(node);
   const tuning = readExtractTuning(override);
   if (!tuning) return editor;
+  if (editor.source === "const") {
+    return {
+      source: "const",
+      value: tuning.value !== undefined ? tuning.value : editor.value,
+    };
+  }
   if (editor.source === "dom") {
     return {
       ...editor,
@@ -173,6 +192,11 @@ export function extractTuningDiff(
     }
     if (editor.pattern !== defaults.pattern) {
       tuning.pattern = editor.pattern;
+      changed = true;
+    }
+  } else if (editor.source === "const" && defaults.source === "const") {
+    if (editor.value !== defaults.value) {
+      tuning.value = editor.value;
       changed = true;
     }
   }
@@ -308,6 +332,21 @@ export function ExtractTuningFields({
             onChange={(event) => onChange({ ...editor, pattern: event.target.value })}
           />
         </div>
+      </div>
+    );
+  }
+
+  if (editor.source === "const") {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="w-14 shrink-0 text-[10.5px] text-muted">值</span>
+        <Input
+          className="h-7 min-w-0 flex-1 text-[11px]"
+          value={editor.value}
+          placeholder="手动值"
+          spellCheck={false}
+          onChange={(event) => onChange({ ...editor, value: event.target.value })}
+        />
       </div>
     );
   }

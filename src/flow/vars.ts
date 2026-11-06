@@ -22,9 +22,8 @@ export function effectiveExtractName(
   return graph?.varAliases?.[key]?.trim() || recordedName.trim();
 }
 
-/** 取值节点是否已经有可执行的取值配置（录制或旧版手工配置）。 */
-export function hasExtractSteps(node: FlowExtractNode): boolean {
-  if (node.recordedDsl?.nodes.some((item) => item.type === "extract")) return true;
+/** 旧版单步取值的定位配置是否完整。 */
+export function hasManualExtractConfig(node: FlowExtractNode): boolean {
   const source = node.source ?? "dom";
   if (source === "response") return Boolean(node.response?.urlContains?.trim());
   if (source === "js") return Boolean(node.js?.trim());
@@ -32,6 +31,13 @@ export function hasExtractSteps(node: FlowExtractNode): boolean {
     return Boolean(node.cell?.rowValue || node.cell?.rowText || node.cell?.rowIndex);
   }
   return Boolean(node.selector.trim());
+}
+
+/** 取值节点是否已经有可执行的取值（录制、手动行或旧版单步配置）。 */
+export function hasExtractSteps(node: FlowExtractNode): boolean {
+  if (node.recordedDsl?.nodes.some((item) => item.type === "extract")) return true;
+  if ((node.manualVars?.length ?? 0) > 0) return true;
+  return hasManualExtractConfig(node);
 }
 
 export function listExtractProducers(
@@ -55,15 +61,25 @@ export function listExtractProducers(
             enabled: node.enabled !== false && dslNode.enabled !== false,
           });
         }
-        continue;
+      } else if (hasManualExtractConfig(node)) {
+        producers.push({
+          key: node.id,
+          recordedName: node.varName,
+          name: effectiveExtractName(graph, node.id, node.varName),
+          source: "canvas",
+          enabled: node.enabled !== false,
+        });
       }
-      producers.push({
-        key: node.id,
-        recordedName: node.varName,
-        name: effectiveExtractName(graph, node.id, node.varName),
-        source: "canvas",
-        enabled: node.enabled !== false,
-      });
+      for (const row of node.manualVars ?? []) {
+        const key = `${node.id}::manual::${row.id}`;
+        producers.push({
+          key,
+          recordedName: row.varName,
+          name: effectiveExtractName(graph, key, row.varName),
+          source: "canvas",
+          enabled: node.enabled !== false,
+        });
+      }
       continue;
     }
     const record = recordMap.get(node.recordId);

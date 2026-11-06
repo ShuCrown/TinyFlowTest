@@ -56,6 +56,11 @@ test("录制保留所有取值步骤，一个取值对应一个变量", () => {
   );
   assert.equal(built.value.extracts[0].summary, "text · 编号");
   assert.equal(built.value.extracts[1].summary, "text · 名称");
+  assert.equal(
+    built.value.recordedDsl.nodes.find((node) => node.type === "extract")?.meta
+      ?.sampleValue,
+    "C-0001",
+  );
 });
 
 test("表格取值生成表格摘要", () => {

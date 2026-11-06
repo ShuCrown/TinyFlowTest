@@ -41,7 +41,7 @@ export function buildExtractRecording(
       id: node.id,
       varName: node.varName,
       label:
-        node.source === "response" || node.source === "js"
+        node.source === "response" || node.source === "js" || node.source === "const"
           ? (node.name ?? node.varName)
           : (node.target.label ?? node.name ?? node.varName),
       summary: describeExtractNode(node),
@@ -61,6 +61,9 @@ export function buildExtractRecording(
 }
 
 export function describeExtractNode(node: ExtractNode): string {
+  if (node.source === "const") {
+    return `手动 · ${node.value || "空值"}`;
+  }
   if (node.source === "response") {
     return `接口 · ${node.response.urlContains || "未设置 URL"}`;
   }

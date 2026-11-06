@@ -1,5 +1,6 @@
 import { normalizeDsl } from "../dsl/normalize.ts";
 import type {
+  ConstExtractNode,
   DomExtractNode,
   FlowDsl,
   FlowEdge as DslEdge,
@@ -21,7 +22,7 @@ import type {
   FlowRecordNode,
   OperationRecord,
 } from "../lib/types.ts";
-import { effectiveExtractName } from "./vars.ts";
+import { effectiveExtractName, hasManualExtractConfig } from "./vars.ts";
 
 export class FlowCompileError extends Error {
   readonly code = "FLOW_COMPILE_INVALID";
@@ -133,12 +134,23 @@ export function compileFlow(flow: FlowItem, records: OperationRecord[]): Compile
         if (!name) throw new FlowCompileError(`取值节点 ${node.id} 的记录步骤缺少变量名。`);
         extractVars.push({ nodeId: node.id, name });
       }
-      continue;
+    } else if (hasManualExtractConfig(node)) {
+      extractVars.push({
+        nodeId: node.id,
+        name: effectiveExtractName(graph, node.id, node.varName),
+      });
     }
-    extractVars.push({
-      nodeId: node.id,
-      name: effectiveExtractName(graph, node.id, node.varName),
-    });
+    for (const row of node.manualVars ?? []) {
+      if (row.varName.trim() === "" && !graph.varAliases?.[`${node.id}::manual::${row.id}`]) {
+        throw new FlowCompileError(`取值节点 ${node.id} 的手动取值缺少变量名。`);
+      }
+      const name = effectiveExtractName(
+        graph,
+        `${node.id}::manual::${row.id}`,
+        row.varName,
+      );
+      extractVars.push({ nodeId: node.id, name });
+    }
   }
   // 录制时记在操作记录内部的取值步骤，同样在流程里作为变量产出。
   for (const macro of ordered) {
@@ -287,7 +299,21 @@ function buildExtractNode(
   aliases: Record<string, string>,
 ): MacroBuild {
   if (macro.recordedDsl && macro.recordedDsl.nodes.length > 0) {
-    return buildRecordedExtractNode(macro, macro.recordedDsl, aliases);
+    return appendManualVars(
+      buildRecordedExtractNode(macro, macro.recordedDsl, aliases),
+      macro,
+      aliases,
+    );
+  }
+  const sourceKind = macro.source ?? "dom";
+  const hasSourceIntent = sourceKind === "response" || sourceKind === "js";
+  if (!hasManualExtractConfig(macro) && !hasSourceIntent) {
+    if ((macro.manualVars?.length ?? 0) === 0) {
+      throw new FlowCompileError(
+        `取值节点「${varNameInput.trim()}」还没有录制内容，请先点「录制步骤」。`,
+      );
+    }
+    return appendManualVars(emptyBuild(macro), macro, aliases);
   }
   const varName = varNameInput.trim();
   if (!varName) throw new FlowCompileError(`取值节点 ${macro.id} 缺少变量名。`);
@@ -431,15 +457,82 @@ function buildExtractNode(
   microNodes.set(id, node);
   microIds.push(id);
 
+  return appendManualVars(
+    {
+      macro,
+      entry,
+      exits: [id],
+      microIds,
+      microNodes,
+      internalEdges,
+      systems: macro.preDsl?.systems ?? [],
+      values: {},
+    },
+    macro,
+    aliases,
+  );
+}
+
+function emptyBuild(macro: FlowExtractNode): MacroBuild {
   return {
     macro,
-    entry,
-    exits: [id],
+    entry: "",
+    exits: [],
+    microIds: [],
+    microNodes: new Map(),
+    internalEdges: [],
+    systems: [],
+    values: {},
+  };
+}
+
+/** 把手动添加的取值行接在宏末尾，每个常量行展开成一个 const 取值微节点。 */
+function appendManualVars(
+  build: MacroBuild,
+  macro: FlowExtractNode,
+  aliases: Record<string, string>,
+): MacroBuild {
+  const rows = macro.manualVars ?? [];
+  if (rows.length === 0) return build;
+  const prefix = `${macro.id}::manual::`;
+  const microNodes = new Map(build.microNodes);
+  const microIds = [...build.microIds];
+  const internalEdges = [...build.internalEdges];
+  let previous = "";
+  const firstId = prefix + rows[0]!.id;
+  for (const row of rows) {
+    const id = prefix + row.id;
+    const varName = (
+      aliases[`${macro.id}::manual::${row.id}`] ?? row.varName
+    ).trim();
+    if (!varName) {
+      throw new FlowCompileError(`取值节点 ${macro.id} 的手动取值缺少变量名。`);
+    }
+    const node: ConstExtractNode = {
+      id,
+      type: "extract",
+      name: `取值 ${varName}`,
+      source: "const",
+      varName,
+      value: row.value,
+      enabled: macro.enabled !== false,
+      meta: { flowNodeId: macro.id },
+    };
+    microNodes.set(id, node);
+    microIds.push(id);
+    if (previous) internalEdges.push({ from: previous, to: id });
+    previous = id;
+  }
+  for (const exit of build.exits) {
+    internalEdges.push({ from: exit, to: firstId });
+  }
+  return {
+    ...build,
+    entry: build.entry || firstId,
+    exits: [previous],
     microIds,
     microNodes,
     internalEdges,
-    systems: macro.preDsl?.systems ?? [],
-    values: {},
   };
 }
 
@@ -739,8 +832,11 @@ function collectVarRenames(
             add(`${node.id}::${dslNode.id}`, dslNode.varName);
           }
         }
-      } else {
+      } else if (hasManualExtractConfig(node)) {
         add(node.id, node.varName);
+      }
+      for (const row of node.manualVars ?? []) {
+        add(`${node.id}::manual::${row.id}`, row.varName);
       }
       continue;
     }
@@ -880,7 +976,7 @@ function rewriteVarReferences(nodes: FlowNode[], renames: Map<string, string>): 
                 ? rewriteText(node.response.bodyContains)
                 : undefined,
           };
-        } else if (node.source !== "js") {
+        } else if (node.source !== "js" && node.source !== "const") {
           node.target = rewriteTarget(node.target)!;
         }
         break;

@@ -442,7 +442,9 @@ function NodeTuningDialog({
                         </TableCell>
                         <TableCell className="align-top">
                           <div className="text-[12px] font-medium">
-                            {node.source === "response" || node.source === "js"
+                            {node.source === "response" ||
+                            node.source === "js" ||
+                            node.source === "const"
                               ? (node.name ?? node.varName ?? node.id)
                               : (node.target.label ?? node.name ?? node.varName ?? node.id)}
                           </div>
@@ -453,9 +455,11 @@ function NodeTuningDialog({
                                 ? "接口"
                                 : editor.source === "js"
                                   ? "JS"
-                                  : editor.locate === "cell"
-                                    ? "表格"
-                                    : "DOM"}
+                                  : editor.source === "const"
+                                    ? "手动"
+                                    : editor.locate === "cell"
+                                      ? "表格"
+                                      : "DOM"}
                             </Badge>
                           </div>
                           <div className="mt-1 truncate font-mono text-[10px] text-muted">

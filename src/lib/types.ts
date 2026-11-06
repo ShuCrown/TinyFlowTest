@@ -42,6 +42,13 @@ export interface FlowRecordNode {
 
 export type ExtractRead = "text" | "value" | "attribute";
 
+/** 取值表格里手动添加的一行：回放时直接写入变量，不读取页面。 */
+export interface FlowExtractManualVar {
+  id: string;
+  varName: string;
+  value: string;
+}
+
 /** 取值来源：页面 DOM / 接口响应 / 页面 JS 表达式。 */
 export type ExtractSourceKind = "dom" | "response" | "js";
 
@@ -81,6 +88,8 @@ export interface FlowExtractNode {
   preDsl?: FlowDsl;
   /** 完整录制：包含操作和所有取值步骤；有值时按它展开，忽略单步配置。 */
   recordedDsl?: FlowDsl;
+  /** 手动添加的取值行，回放时直接写入变量。 */
+  manualVars?: FlowExtractManualVar[];
   /** 录制使用的系统，重新录制时预选。 */
   systemId?: string;
   enabled?: boolean;
@@ -108,6 +117,8 @@ export interface ExtractTuning {
   };
   /** JS 来源的表达式覆盖。 */
   js?: string;
+  /** 手动常量取值的覆盖。 */
+  value?: string;
 }
 
 export interface FlowEdge {

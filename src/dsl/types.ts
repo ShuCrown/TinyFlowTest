@@ -226,7 +226,17 @@ export interface JsExtractNode extends ExtractNodeBase {
   js: string;
 }
 
-export type ExtractNode = DomExtractNode | ResponseExtractNode | JsExtractNode;
+/** 手动配置的常量取值：不读取页面，直接把值写入环境变量。 */
+export interface ConstExtractNode extends ExtractNodeBase {
+  source: "const";
+  value: string;
+}
+
+export type ExtractNode =
+  | DomExtractNode
+  | ResponseExtractNode
+  | JsExtractNode
+  | ConstExtractNode;
 
 /** 复合选择器：一次意图 = 打开面板 + 可选筛选 + 选项/行 + 可选提交。 */
 export type PickerMode = "inline" | "dialog";

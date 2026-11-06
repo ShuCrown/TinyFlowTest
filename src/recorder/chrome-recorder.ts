@@ -298,6 +298,7 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
           sourceText: "extract",
           needsConfirm: read === "attribute" && !attribute,
           sourceIndex: index,
+          sampleValue: step.value === undefined ? undefined : String(step.value),
         },
       });
       lastTarget = target;

@@ -458,13 +458,21 @@ async function executeInteract(
         (element as HTMLElement).blur();
         await sleep(0);
       }
-      return { message: `输入 ${label} ${JSON.stringify(value)}`, strategy, healed };
+      return {
+        message: `输入 ${label} ${JSON.stringify(value)}${valueSource(node.value)}`,
+        strategy,
+        healed,
+      };
     }
     case "nativeSelect":
     case "select": {
       const value = valueString(resolveNodeValue(node, expressionScope(context)));
       const actual = selectOption(element, value);
-      return { message: `选择 ${label} ${JSON.stringify(actual)}`, strategy, healed };
+      return {
+        message: `选择 ${label} ${JSON.stringify(actual)}${valueSource(node.value)}`,
+        strategy,
+        healed,
+      };
     }
     case "check": {
       const expected = resolveChecked(node, expressionScope(context));
@@ -475,7 +483,11 @@ async function executeInteract(
           target.attempts,
         );
       }
-      return { message: `${expected ? "勾选" : "取消勾选"} ${label}`, strategy, healed };
+      return {
+        message: `${expected ? "勾选" : "取消勾选"} ${label}${valueSource(node.value)}`,
+        strategy,
+        healed,
+      };
     }
     case "click": {
       if (hiddenSelectControl && selectTrigger) {
@@ -1067,7 +1079,11 @@ async function executeExtract(
   let raw: string;
   let targetLabel: string;
 
-  if (node.source === "response") {
+  if (node.source === "const") {
+    targetLabel = "手动值";
+    raw = node.value;
+    strategy = "const";
+  } else if (node.source === "response") {
     targetLabel = `${node.response.method ?? "ANY"} ${node.response.urlContains}`;
     raw = await extractResponseValue(context, node, timeoutMs);
     strategy = "response";
@@ -1089,7 +1105,7 @@ async function executeExtract(
   }
 
   const value = applyExtractPattern(raw, node);
-  if (!value) {
+  if (!value && node.source !== "const") {
     const message = `取值节点未取到 ${node.varName}: ${targetLabel}`;
     if (node.optional) return { message: `${message}（已忽略）`, strategy, healed };
     throw new ReplayError(message);
@@ -1106,6 +1122,13 @@ async function executeExtract(
 function applyExtractTuning(node: ExtractNode, tuning: ExtractTuning): ExtractNode {
   const pattern =
     tuning.pattern !== undefined ? tuning.pattern || undefined : node.pattern;
+  if (node.source === "const") {
+    return {
+      ...node,
+      value: tuning.value !== undefined ? tuning.value : node.value,
+      pattern,
+    };
+  }
   if (node.source === "response") {
     return {
       ...node,
@@ -1262,6 +1285,18 @@ function applyExtractPattern(
   const match = text.match(regex);
   if (!match) return "";
   return normalizeText(match[1] ?? match[0]);
+}
+
+/** 运行日志里标出值来自哪个变量/模板，便于区分录制值和流程注入。 */
+function valueSource(value: unknown): string {
+  if (value && typeof value === "object" && !Array.isArray(value) && "kind" in value) {
+    const expr = value as { kind?: string; name?: string; template?: string };
+    if (expr.kind === "var" && expr.name) return `（来源 变量 ${expr.name}）`;
+    if (expr.kind === "template" && expr.template) {
+      return `（来源 模板 ${expr.template}）`;
+    }
+  }
+  return "";
 }
 
 function resolveNodeValue(node: InteractNode, values: Record<string, unknown>): unknown {

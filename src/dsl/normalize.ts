@@ -141,8 +141,10 @@ function normalizeNode(node: FlowNode): FlowNode {
     case "wait":
       return { ...base, condition: normalizeSignal(base.condition) };
     case "extract":
-      // 接口 / JS 来源没有 DOM target；仅 DOM 来源需要归一化定位候选。
-      return base.source === "response" || base.source === "js"
+      // 接口 / JS / 常量来源没有 DOM target；仅 DOM 来源需要归一化定位候选。
+      return base.source === "response" ||
+        base.source === "js" ||
+        base.source === "const"
         ? base
         : { ...base, target: normalizeTarget(base.target) };
   }

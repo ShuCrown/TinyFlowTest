@@ -11,6 +11,7 @@ export function readExtractTuning(value: unknown): ExtractTuning | null {
   if (typeof record.attribute === "string") tuning.attribute = record.attribute;
   if (typeof record.pattern === "string") tuning.pattern = record.pattern;
   if (typeof record.js === "string") tuning.js = record.js;
+  if (typeof record.value === "string") tuning.value = record.value;
   const cell = record.cell;
   if (cell && typeof cell === "object" && !Array.isArray(cell)) {
     const item = cell as Record<string, unknown>;

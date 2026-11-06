@@ -258,6 +258,13 @@ test("没有录制或手工配置的取值节点不产出变量", () => {
     }),
     true,
   );
+  assert.equal(
+    hasExtractSteps({
+      ...empty,
+      manualVars: [{ id: "m1", varName: "manual1", value: "值" }],
+    }),
+    true,
+  );
 });
 
 test("变量名冲突时生成画布内唯一的名字", () => {
