@@ -15,6 +15,7 @@ import {
 } from "../dsl/panel-rules.ts";
 import type { PanelRule, RuleMatch } from "../dsl/panel-rules.ts";
 import type { CellControl, CellRef } from "../dsl/types.ts";
+import { observeNetwork } from "../lib/network-observer.ts";
 import { OverlayWatcher } from "./overlay.ts";
 
 /** 弹层内的可选项角色：只有这些才把点击当成「选择」。 */
@@ -54,6 +55,8 @@ interface TextStep {
 
 export interface DomRecorderOptions {
   onChange?: (steps: ChromeRecorderStep[]) => void;
+  /** 取值拾取模式的开关状态；reason 用于区分捕获成功和取消。 */
+  onValueModeChange?: (armed: boolean, reason?: "captured" | "canceled") => void;
 }
 
 /**
@@ -97,6 +100,9 @@ export class DomRecorder {
   private networkAction: { step: ChromeRecorderStep; at: number } | null = null;
   /** 目标页 fetch / XHR 包装的恢复函数。 */
   private networkCleanup: (() => void) | null = null;
+  /** 取值模式：点击目标页字段时生成 extract 步骤而不是操作步骤。 */
+  private valueMode = false;
+  private valueModeCleanup: (() => void) | null = null;
 
   constructor(options: DomRecorderOptions = {}) {
     this.options = options;
@@ -152,6 +158,31 @@ export class DomRecorder {
     return this.steps.slice();
   }
 
+  /** 进入取值拾取模式：下一次点击目标页字段会生成 extract 步骤。 */
+  armValueCapture(): boolean {
+    if (!this.recording || !this.doc) return false;
+    if (this.valueMode) return true;
+    // 先把刚输入还没落盘的内容记下来，保证取值步骤排在搜索/输入之后。
+    this.flushPendingText();
+    this.flushActiveText();
+    this.valueMode = true;
+    this.mountValuePicker(this.doc);
+    this.options.onValueModeChange?.(true);
+    return true;
+  }
+
+  cancelValueCapture(reason: "captured" | "canceled" = "canceled"): void {
+    if (!this.valueMode) return;
+    this.valueMode = false;
+    this.valueModeCleanup?.();
+    this.valueModeCleanup = null;
+    this.options.onValueModeChange?.(false, reason);
+  }
+
+  isValueCaptureArmed(): boolean {
+    return this.valueMode;
+  }
+
   recordNavigation(url: string): void {
     if (!this.recording || !url || url === "about:blank") return;
     const last = this.steps[this.steps.length - 1];
@@ -170,6 +201,7 @@ export class DomRecorder {
   }
 
   private detach(): void {
+    this.cancelValueCapture("canceled");
     if (this.doc) {
       for (const { type, handler } of this.listeners) {
         this.doc.removeEventListener(type, handler, true);
@@ -193,7 +225,7 @@ export class DomRecorder {
    * 直接读会把「打开动作」误记成「打开状态下的一次点击」，切簇就丢了边界。
    */
   private onPointerDown(event: Event): void {
-    if (!this.recording) return;
+    if (!this.recording || this.valueMode) return;
     const raw = event.target as Element | null;
     if (!raw || raw.nodeType !== 1) {
       this.preGestureOpen = null;
@@ -212,7 +244,7 @@ export class DomRecorder {
   }
 
   private onClick(event: Event): void {
-    if (!this.recording) return;
+    if (!this.recording || this.valueMode) return;
     this.flushPendingText();
     this.flushActiveText();
     this.lastHover = null;
@@ -245,7 +277,7 @@ export class DomRecorder {
   }
 
   private onChange(event: Event): void {
-    if (!this.recording) return;
+    if (!this.recording || this.valueMode) return;
     const target = event.target as Element | null;
     if (!target || target.nodeType !== 1) return;
     // 行 / 选项里的勾选是点击的副作用：点击已经记录了意图，
@@ -302,7 +334,7 @@ export class DomRecorder {
   }
 
   private onInput(event: Event): void {
-    if (!this.recording) return;
+    if (!this.recording || this.valueMode) return;
     const target = event.target as Element | null;
     if (!target || target.nodeType !== 1) return;
     const tag = target.tagName.toLowerCase();
@@ -340,13 +372,14 @@ export class DomRecorder {
 
   /** 聚焦只清脏标记：没有 input 的字段不应该在 flush 时生成步骤。 */
   private onFocusIn(event: Event): void {
+    if (this.valueMode) return;
     const target = event.target as Element | null;
     if (!target || target.nodeType !== 1) return;
     this.dirtyText.delete(target);
   }
 
   private onHover(event: Event): void {
-    if (!this.recording) return;
+    if (!this.recording || this.valueMode) return;
     this.flushPendingText();
     const raw = event.target as Element | null;
     if (!raw || raw.nodeType !== 1) return;
@@ -373,6 +406,13 @@ export class DomRecorder {
 
   private onKeydown(event: Event): void {
     if (!this.recording) return;
+    if (this.valueMode) {
+      // 拾取期间拦下页面快捷键；Esc 退出取值模式。
+      event.preventDefault();
+      event.stopPropagation();
+      if ((event as KeyboardEvent).key === "Escape") this.cancelValueCapture("canceled");
+      return;
+    }
     const key = (event as KeyboardEvent).key;
     if (!PRESS_KEYS.has(key)) return;
     const active = this.doc?.activeElement;
@@ -524,16 +564,156 @@ export class DomRecorder {
     this.emit();
   }
 
+  /** 覆盖目标页的取值拾取层：拦截点击并描边悬停字段，不触发页面自身操作。 */
+  private mountValuePicker(doc: Document): void {
+    const layer = doc.createElement("div");
+    layer.setAttribute("data-tf-value-picker", "layer");
+    layer.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "z-index:2147483647",
+      "cursor:crosshair",
+      "background:rgba(193,75,42,0.04)",
+    ].join(";");
+
+    const highlight = doc.createElement("div");
+    highlight.setAttribute("data-tf-value-picker", "highlight");
+    highlight.style.cssText = [
+      "position:fixed",
+      "z-index:2147483646",
+      "pointer-events:none",
+      "box-sizing:border-box",
+      "border:2px solid #c14b2a",
+      "border-radius:4px",
+      "background:rgba(193,75,42,0.08)",
+      "display:none",
+    ].join(";");
+
+    const hint = doc.createElement("div");
+    hint.setAttribute("data-tf-value-picker", "hint");
+    hint.textContent = "取值模式：点击要读取的字段 · Esc 取消";
+    hint.style.cssText = [
+      "position:fixed",
+      "left:50%",
+      "bottom:18px",
+      "transform:translateX(-50%)",
+      "z-index:2147483647",
+      "pointer-events:none",
+      "padding:6px 14px",
+      "border-radius:999px",
+      "background:#1f2937",
+      "color:#fff",
+      "font:12px/1.5 system-ui, sans-serif",
+      "box-shadow:0 8px 24px rgba(15,23,42,0.28)",
+      "white-space:nowrap",
+    ].join(";");
+
+    let hovered: Element | null = null;
+
+    const pickAt = (x: number, y: number): Element | null => {
+      const elements = doc.elementsFromPoint(x, y);
+      const hit = elements.find(
+        (element) =>
+          !element.closest("[data-tf-value-picker]") &&
+          !/^(html|body)$/i.test(element.tagName),
+      );
+      return hit ? resolveValueTarget(hit) : null;
+    };
+
+    const onMove = (event: MouseEvent): void => {
+      hovered = pickAt(event.clientX, event.clientY);
+      if (!hovered) {
+        highlight.style.display = "none";
+        return;
+      }
+      const rect = hovered.getBoundingClientRect();
+      highlight.style.display = "block";
+      highlight.style.left = `${rect.left - 2}px`;
+      highlight.style.top = `${rect.top - 2}px`;
+      highlight.style.width = `${rect.width + 4}px`;
+      highlight.style.height = `${rect.height + 4}px`;
+    };
+
+    const block = (event: Event): void => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const onClick = (event: MouseEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = hovered ?? pickAt(event.clientX, event.clientY);
+      if (target) this.captureValue(target);
+    };
+
+    layer.addEventListener("mousemove", onMove);
+    layer.addEventListener("mousedown", block);
+    layer.addEventListener("mouseup", block);
+    layer.addEventListener("pointerdown", block);
+    layer.addEventListener("pointerup", block);
+    layer.addEventListener("click", onClick);
+    layer.addEventListener("contextmenu", (event) => event.preventDefault());
+    doc.documentElement.append(layer, highlight, hint);
+
+    this.valueModeCleanup = () => {
+      layer.removeEventListener("mousemove", onMove);
+      layer.removeEventListener("mousedown", block);
+      layer.removeEventListener("mouseup", block);
+      layer.removeEventListener("pointerdown", block);
+      layer.removeEventListener("pointerup", block);
+      layer.removeEventListener("click", onClick);
+      layer.remove();
+      highlight.remove();
+      hint.remove();
+    };
+  }
+
+  private captureValue(element: Element): void {
+    if (!this.recording) return;
+    const tag = element.tagName.toLowerCase();
+    if (tag === "html" || tag === "body") return;
+    this.flushPendingText();
+    this.flushActiveText();
+    const cell = element.closest("td, th") as HTMLTableCellElement | null;
+    const cellRef = cell ? this.cellRefForElement(element) : undefined;
+    const readMode: "text" | "value" = isValueControl(element) ? "value" : "text";
+    const step: ChromeRecorderStep = {
+      type: "extract",
+      selectors: selectorsFor(element, true),
+      varName: this.nextExtractVarName(),
+      readMode,
+      value: extractSample(element),
+      ...dialogContext(element),
+      ...labelContext(element),
+    };
+    if (cellRef) {
+      step.semantic = { cell: { ...cellRef, control: controlKind(element) } };
+    }
+    if (!step.labelText) step.labelText = extractLabelFor(element, cell);
+    this.record(step, step.semantic);
+    this.cancelValueCapture("captured");
+  }
+
+  private nextExtractVarName(): string {
+    const used = new Set(
+      this.steps
+        .filter((step) => step.type === "extract")
+        .map((step) => String(step.varName ?? "")),
+    );
+    let index = 1;
+    while (used.has(`extracted${index}`)) index += 1;
+    return `extracted${index}`;
+  }
+
   /** 包装目标页 fetch / XHR；请求参数挂在触发它的步骤上，随录制 JSON 一起输出。 */
   private installNetworkObserver(doc: Document): void {
     const win = doc.defaultView;
     if (!win) return;
     this.networkCleanup?.();
-    this.networkCleanup = observeNetwork(
-      win,
-      (request) => this.onNetworkRequest(request),
-      (request) => this.onNetworkResponse(request),
-    );
+    this.networkCleanup = observeNetwork(win, {
+      onRequest: (request) => this.onNetworkRequest(request),
+      onResponse: (response) => this.onNetworkResponse(response),
+    });
   }
 
   private onNetworkRequest(request: CapturedRequest): void {
@@ -904,185 +1084,6 @@ function cssEscape(value: string): string {
   return value.replace(/([^\w-])/g, "\\$1");
 }
 
-/** 目标页网络观察：包装 fetch / XMLHttpRequest，只读参数，不改变请求行为。 */
-function observeNetwork(
-  win: Window,
-  onRequest: (request: CapturedRequest) => void,
-  onResponse: (request: CapturedRequest) => void,
-): () => void {
-  const restores: Array<() => void> = [];
-
-  const originalFetch = win.fetch;
-  if (typeof originalFetch === "function") {
-    const wrapped = function (
-      this: Window,
-      input: RequestInfo | URL,
-      init?: RequestInit,
-    ): Promise<Response> {
-      const request = captureFetchRequest(input, init, win);
-      const promise = originalFetch.call(this, input, init);
-      if (request) {
-        onRequest(request);
-        promise.then(
-          (response) => {
-            request.status = response.status;
-            onResponse(request);
-          },
-          () => {},
-        );
-      }
-      return promise;
-    };
-    try {
-      win.fetch = wrapped as typeof win.fetch;
-      restores.push(() => {
-        if (win.fetch === (wrapped as typeof win.fetch)) win.fetch = originalFetch;
-      });
-    } catch {
-      // 某些页面冻结了 fetch，放弃 fetch 捕获，XHR 仍然可用。
-    }
-  }
-
-  const targetWindow = win as Window & typeof globalThis;
-  const xhrProto = targetWindow.XMLHttpRequest?.prototype as unknown as
-    | {
-        open: (...args: unknown[]) => unknown;
-        send: (...args: unknown[]) => unknown;
-      }
-    | undefined;
-  if (xhrProto) {
-    const originalOpen = xhrProto.open;
-    const originalSend = xhrProto.send;
-    const wrappedOpen = function (this: XMLHttpRequest, ...args: unknown[]): unknown {
-      const method = String(args[0] ?? "GET").toUpperCase();
-      const url = resolveNetworkUrl(String(args[1] ?? ""), win);
-      (this as XMLHttpRequest & { __tinyflowRequest?: CapturedRequest }).__tinyflowRequest = {
-        method,
-        url,
-      };
-      return originalOpen.apply(this, args);
-    };
-    const wrappedSend = function (this: XMLHttpRequest, body?: unknown): unknown {
-      const state = this as XMLHttpRequest & { __tinyflowRequest?: CapturedRequest };
-      const request = state.__tinyflowRequest;
-      if (request) {
-        request.body = captureRequestBody(body);
-        onRequest(request);
-        this.addEventListener(
-          "loadend",
-          () => {
-            request.status = this.status;
-            onResponse(request);
-          },
-          { once: true },
-        );
-      }
-      return originalSend.apply(this, [body]);
-    };
-    try {
-      xhrProto.open = wrappedOpen;
-      xhrProto.send = wrappedSend;
-      restores.push(() => {
-        if (xhrProto.open === wrappedOpen) xhrProto.open = originalOpen;
-        if (xhrProto.send === wrappedSend) xhrProto.send = originalSend;
-      });
-    } catch {
-      // 原型被冻结时跳过 XHR 捕获。
-    }
-  }
-
-  return () => {
-    for (const restore of restores) restore();
-  };
-}
-
-function captureFetchRequest(
-  input: unknown,
-  init: RequestInit | undefined,
-  win: Window,
-): CapturedRequest | null {
-  let url = "";
-  let method = init?.method;
-  if (typeof input === "string") {
-    url = input;
-  } else if (input && typeof input === "object") {
-    const request = input as { url?: unknown; method?: unknown };
-    if (typeof request.url === "string") url = request.url;
-    if (method === undefined && typeof request.method === "string") method = request.method;
-  }
-  if (!url) return null;
-  const body = captureRequestBody(init?.body);
-  return {
-    method: String(method ?? "GET").toUpperCase(),
-    url: resolveNetworkUrl(url, win),
-    ...(body === undefined ? {} : { body }),
-  };
-}
-
-/** 只保留可读参数：JSON 对象、表单字段、URLSearchParams；二进制只记类型/大小。 */
-function captureRequestBody(body: unknown): unknown {
-  if (body === null || body === undefined) return undefined;
-  if (typeof body === "string") {
-    const text = body.trim();
-    if (!text) return undefined;
-    try {
-      return limitSerialized(JSON.parse(text));
-    } catch {
-      return text.slice(0, 3000);
-    }
-  }
-  const tag = Object.prototype.toString.call(body);
-  if (tag === "[object URLSearchParams]") {
-    return limitSerialized(Object.fromEntries((body as URLSearchParams).entries()));
-  }
-  if (tag === "[object FormData]") {
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of (body as FormData).entries()) {
-      result[key] =
-        typeof value === "string"
-          ? value
-          : {
-              fileName: String((value as File).name ?? ""),
-              size: Number((value as Blob).size ?? 0),
-              type: String((value as Blob).type ?? ""),
-            };
-    }
-    return limitSerialized(result);
-  }
-  if (tag === "[object Blob]") {
-    return `<Blob ${String((body as Blob).type || "binary")} ${Number((body as Blob).size)} bytes>`;
-  }
-  if (tag === "[object ArrayBuffer]" || ArrayBuffer.isView(body)) {
-    return "<binary body>";
-  }
-  if (typeof body === "object") {
-    try {
-      return limitSerialized(JSON.parse(JSON.stringify(body)));
-    } catch {
-      return "<不可序列化 body>";
-    }
-  }
-  return String(body).slice(0, 3000);
-}
-
-function limitSerialized(value: unknown): unknown {
-  try {
-    const text = JSON.stringify(value);
-    if (typeof text !== "string") return String(value);
-    return text.length > 3000 ? `${text.slice(0, 3000)}…` : value;
-  } catch {
-    return "<不可序列化 body>";
-  }
-}
-
-function resolveNetworkUrl(raw: string, win: Window): string {
-  try {
-    return new (win as Window & typeof globalThis).URL(raw, win.location.href).href;
-  } catch {
-    return raw;
-  }
-}
-
 /** 单元格里已经存在编辑器：沿用进入编辑时记下的地址，不再按当前 DOM 重算。 */
 const EDIT_CONTROL_SELECTOR = 'input, textarea, select, [contenteditable="true"]';
 
@@ -1106,6 +1107,48 @@ function controlKind(element: Element): CellControl {
   if (tag === "select") return "select";
   if ((element as HTMLElement).isContentEditable) return "contenteditable";
   return "self";
+}
+
+/** 取值拾取：表单控件取控件本身，按钮/链接取自身，普通文本落在表格里取整格。 */
+function resolveValueTarget(element: Element): Element {
+  if (isValueControl(element)) return element;
+  const actionable = element.closest(
+    'button, a, [role="button"], [role="link"], [role="menuitem"]',
+  );
+  if (actionable) return actionable;
+  return element.closest("td, th") ?? element;
+}
+
+function isValueControl(element: Element): boolean {
+  return (
+    /^(input|textarea|select)$/i.test(element.tagName) ||
+    (element as HTMLElement).isContentEditable
+  );
+}
+
+function extractSample(element: Element): string {
+  const tag = element.tagName.toLowerCase();
+  if (tag === "select") {
+    const select = element as HTMLSelectElement;
+    return select.selectedOptions[0]?.textContent?.trim() ?? select.value;
+  }
+  if (tag === "input" || tag === "textarea") {
+    return String((element as HTMLInputElement).value ?? "");
+  }
+  return normalizeText(element.textContent ?? "");
+}
+
+function extractLabelFor(element: Element, cell: HTMLTableCellElement | null): string {
+  const table = cell?.closest("table") as HTMLTableElement | null;
+  const header = table && cell ? headerTexts(table).byIndex.get(cell.cellIndex) : undefined;
+  if (header) return header;
+  const aria = element.getAttribute("aria-label");
+  if (aria) return normalizeText(aria);
+  const text = normalizeText(element.textContent ?? "").slice(0, 40);
+  if (text) return text;
+  const name = element.getAttribute("name");
+  if (name) return name;
+  return element.tagName.toLowerCase();
 }
 
 /**

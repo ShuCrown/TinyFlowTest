@@ -31,8 +31,10 @@ export interface CellRef {
   keyHeader?: string;
   /** 行标识列的序号（1 基）。 */
   keyIndex?: number;
-  /** 没有唯一列时的兜底：整行文本。 */
+  /** 整行文本；表内没有唯一列时使用。没有 key 列时只按完整行文本匹配。 */
   rowText?: string;
+  /** 按筛选结果中的第 N 行（1 基）定位，显式选择「第一行」时使用。 */
+  rowIndex?: number;
   /** 目标列的表头；重名时退回 colIndex。 */
   header?: string;
   /** 目标列的序号（1 基，按 cellIndex）。 */
@@ -182,20 +184,49 @@ export interface WaitNode extends NodeBase {
   message?: string;
 }
 
-/** 从当前页面读取一个值，写入流程环境变量。 */
-export interface ExtractNode extends NodeBase {
+/** 取值节点的公共字段：来源各自决定定位方式。 */
+export interface ExtractNodeBase extends NodeBase {
   type: "extract";
+  /** 流程环境变量名。 */
+  varName: string;
+  /** 可选清洗正则；有捕获组时取第一组，否则取整个匹配。 */
+  pattern?: string;
+  /** 取不到值时是否允许继续；默认失败。 */
+  optional?: boolean;
+}
+
+/** 从当前页面读取一个值，写入流程环境变量。 */
+export interface DomExtractNode extends ExtractNodeBase {
+  source?: "dom";
   target: TargetRef;
   /** 读取来源：文本、表单值或某个属性。 */
   read: "text" | "value" | "attribute";
   attribute?: string;
-  /** 可选清洗正则；有捕获组时取第一组，否则取整个匹配。 */
-  pattern?: string;
-  /** 流程环境变量名。 */
-  varName: string;
-  /** 取不到值时是否允许继续；默认失败。 */
-  optional?: boolean;
+  /** 目标不可见时仍读取（隐藏输入、JSON script 等）。 */
+  includeHidden?: boolean;
 }
+
+/** 从页面实际收到的接口响应中取值，适用于页面未展示的数据。 */
+export interface ResponseExtractNode extends ExtractNodeBase {
+  source: "response";
+  response: {
+    /** 不填表示任意方法。 */
+    method?: string;
+    urlContains: string;
+    /** 可选请求体包含匹配；GraphQL 等同 URL 接口用它区分操作。 */
+    bodyContains?: string;
+    /** JSON 路径，如 data.customer.code；留空表示整段响应文本。 */
+    path?: string;
+  };
+}
+
+/** 在目标页上下文执行表达式取值（高级兜底）。 */
+export interface JsExtractNode extends ExtractNodeBase {
+  source: "js";
+  js: string;
+}
+
+export type ExtractNode = DomExtractNode | ResponseExtractNode | JsExtractNode;
 
 /** 复合选择器：一次意图 = 打开面板 + 可选筛选 + 选项/行 + 可选提交。 */
 export type PickerMode = "inline" | "dialog";

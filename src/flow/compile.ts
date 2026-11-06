@@ -1,9 +1,13 @@
 import { normalizeDsl } from "../dsl/normalize.ts";
 import type {
+  DomExtractNode,
   FlowDsl,
   FlowEdge as DslEdge,
   FlowNode,
+  JsExtractNode,
   PickerNode,
+  ResponseExtractNode,
+  TargetRef,
   ValueExpr,
 } from "../dsl/index.ts";
 import type {
@@ -33,8 +37,8 @@ export interface CompiledFlow {
   vars: Record<string, unknown>;
   /** 画布节点 id → 展开后的微节点 id。 */
   groups: Record<string, string[]>;
-  /** 取值节点产出的变量，供变量面板展示。 */
-  extractVars: Array<{ nodeId: string; name: string }>;
+  /** 取值节点产出的变量，供变量面板展示；recordNodeId 表示来自操作记录内部的取值步骤。 */
+  extractVars: Array<{ nodeId: string; name: string; recordNodeId?: string }>;
   warnings: string[];
 }
 
@@ -107,10 +111,30 @@ export function compileFlow(flow: FlowItem, records: OperationRecord[]): Compile
   }
 
   const vars = collectManualVars(graph);
-  const extractVars = graph.nodes.filter(isExtractNode).map((node) => ({
-    nodeId: node.id,
-    name: node.varName.trim(),
-  }));
+  const extractVars: Array<{ nodeId: string; name: string; recordNodeId?: string }> = graph.nodes
+    .filter(isExtractNode)
+    .map((node) => ({
+      nodeId: node.id,
+      name: node.varName.trim(),
+    }));
+  // 录制时记在操作记录内部的取值步骤，同样在流程里作为变量产出。
+  for (const macro of ordered) {
+    if (!isRecordNode(macro) || macro.enabled === false) continue;
+    const record = recordMap.get(macro.recordId);
+    if (!record?.dsl) continue;
+    for (const dslNode of record.dsl.nodes) {
+      if (dslNode.type !== "extract" || dslNode.enabled === false) continue;
+      const name = dslNode.varName.trim();
+      if (!name) {
+        throw new FlowCompileError(`记录「${record.name}」的取值节点缺少变量名。`);
+      }
+      extractVars.push({
+        nodeId: `${macro.id}::${dslNode.id}`,
+        name,
+        recordNodeId: macro.id,
+      });
+    }
+  }
   validateVariables(graph, ordered, orderIndex, extractVars, vars);
 
   applyInjections(graph, builds, warnings);
@@ -226,31 +250,122 @@ function buildRecordNode(
 
 function buildExtractNode(macro: FlowExtractNode): MacroBuild {
   const varName = macro.varName.trim();
-  const selector = macro.selector.trim();
   if (!varName) throw new FlowCompileError(`取值节点 ${macro.id} 缺少变量名。`);
-  if (!selector) throw new FlowCompileError(`取值节点「${varName}」缺少目标选择器。`);
   const id = `${macro.id}::extract`;
-  const node: FlowNode = {
-    id,
-    type: "extract",
-    name: `取值 ${varName}`,
-    target: {
-      label: varName,
-      strategies: [{ type: "css", value: selector }],
-    },
-    read: macro.read,
-    attribute: macro.attribute?.trim() || undefined,
-    pattern: macro.pattern?.trim() || undefined,
-    varName,
-    enabled: macro.enabled !== false,
-    meta: { flowNodeId: macro.id },
-  };
+  const pattern = macro.pattern?.trim() || undefined;
+  const enabled = macro.enabled !== false;
+  const source = macro.source ?? "dom";
+
+  let node: FlowNode;
+  if (source === "response") {
+    const urlContains = macro.response?.urlContains?.trim() ?? "";
+    if (!urlContains) {
+      throw new FlowCompileError(`取值节点「${varName}」缺少接口 URL 匹配。`);
+    }
+    node = {
+      id,
+      type: "extract",
+      name: `取值 ${varName}`,
+      source: "response",
+      response: {
+        method: macro.response?.method?.trim().toUpperCase() || undefined,
+        urlContains,
+        bodyContains: macro.response?.bodyContains?.trim() || undefined,
+        path: macro.response?.path?.trim() || undefined,
+      },
+      pattern,
+      varName,
+      enabled,
+      meta: { flowNodeId: macro.id },
+    } satisfies ResponseExtractNode;
+  } else if (source === "js") {
+    const expression = macro.js?.trim() ?? "";
+    if (!expression) {
+      throw new FlowCompileError(`取值节点「${varName}」缺少 JS 表达式。`);
+    }
+    node = {
+      id,
+      type: "extract",
+      name: `取值 ${varName}`,
+      source: "js",
+      js: expression,
+      pattern,
+      varName,
+      enabled,
+      meta: { flowNodeId: macro.id },
+    } satisfies JsExtractNode;
+  } else {
+    let target: TargetRef;
+    if (macro.locate === "cell") {
+      const cell = macro.cell;
+      if (!cell) throw new FlowCompileError(`取值节点「${varName}」缺少表格定位信息。`);
+      const normalizedCell = Object.fromEntries(
+        Object.entries({
+          ...cell,
+          table: cell.table?.trim(),
+          keyHeader: cell.keyHeader?.trim(),
+          header: cell.header?.trim(),
+          rowValue: cell.rowValue?.trim(),
+          rowText: cell.rowText?.trim(),
+        }).filter(([, value]) => value !== undefined && value !== ""),
+      ) as typeof cell;
+      if (
+        normalizedCell.rowValue === undefined &&
+        normalizedCell.rowText === undefined &&
+        normalizedCell.rowIndex === undefined
+      ) {
+        throw new FlowCompileError(`取值节点「${varName}」缺少行定位值。`);
+      }
+      if (
+        normalizedCell.rowIndex !== undefined &&
+        (!Number.isInteger(normalizedCell.rowIndex) || normalizedCell.rowIndex < 1)
+      ) {
+        throw new FlowCompileError(`取值节点「${varName}」的行序号必须是大于 0 的整数。`);
+      }
+      if (
+        normalizedCell.rowValue !== undefined &&
+        normalizedCell.keyHeader === undefined &&
+        normalizedCell.keyIndex === undefined
+      ) {
+        throw new FlowCompileError(
+          `取值节点「${varName}」按行值定位时需要填写行值所在列（表头或列序号）。`,
+        );
+      }
+      if (normalizedCell.header === undefined && normalizedCell.colIndex === undefined) {
+        throw new FlowCompileError(`取值节点「${varName}」缺少目标列（表头或列序号）。`);
+      }
+      target = { label: varName, strategies: [{ type: "cell", cell: normalizedCell }] };
+    } else {
+      const selector = macro.selector.trim();
+      if (!selector) throw new FlowCompileError(`取值节点「${varName}」缺少目标选择器。`);
+      target = { label: varName, strategies: [{ type: "css", value: selector }] };
+    }
+    const attribute = macro.attribute?.trim() || undefined;
+    if (macro.read === "attribute" && !attribute) {
+      throw new FlowCompileError(`取值节点「${varName}」缺少属性名。`);
+    }
+    node = {
+      id,
+      type: "extract",
+      name: `取值 ${varName}`,
+      source: "dom",
+      target,
+      read: macro.read,
+      attribute,
+      includeHidden: macro.includeHidden === true,
+      pattern,
+      varName,
+      enabled,
+      meta: { flowNodeId: macro.id },
+    } satisfies DomExtractNode;
+  }
+
   return {
     macro,
     entry: id,
     exits: [id],
     microIds: [id],
-    microNodes: new Map([["extract", node]]),
+    microNodes: new Map([[id, node]]),
     internalEdges: [],
     systems: [],
     values: {},
@@ -348,7 +463,7 @@ function validateVariables(
   graph: FlowGraph,
   ordered: FlowCanvasNode[],
   orderIndex: Map<string, number>,
-  extractVars: Array<{ nodeId: string; name: string }>,
+  extractVars: Array<{ nodeId: string; name: string; recordNodeId?: string }>,
   manualVars: Record<string, unknown>,
 ): void {
   const producers = new Map<string, number>();
@@ -356,9 +471,17 @@ function validateVariables(
   for (const item of extractVars) {
     if (!item.name) throw new FlowCompileError("取值节点缺少变量名。");
     if (producers.has(item.name)) {
-      throw new FlowCompileError(`环境变量重复产出: ${item.name}`);
+      throw new FlowCompileError(
+        `环境变量重复产出: ${item.name}（画布取值与记录内取值只能有一个同名变量，请在录制页重命名）`,
+      );
     }
-    producers.set(item.name, orderIndex.get(item.nodeId) ?? Number.MAX_SAFE_INTEGER);
+    const producerIndex = item.recordNodeId
+      ? orderIndex.get(item.recordNodeId)
+      : orderIndex.get(item.nodeId);
+    if (producerIndex === undefined) {
+      throw new FlowCompileError(`变量 ${item.name} 的产出节点不在画布顺序里。`);
+    }
+    producers.set(item.name, producerIndex);
   }
 
   for (const node of ordered) {

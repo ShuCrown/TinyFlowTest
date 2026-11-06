@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   CheckCircle2,
+  Crosshair,
   Loader2,
   Mic,
   Play,
@@ -17,6 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { NodeTuningDialog } from "@/components/NodeTuningDialog";
 import { cn } from "@/lib/utils";
 import { getRecord, getSystemToken, listSystems, saveRecord, saveSystemToken } from "@/lib/store";
@@ -26,7 +28,7 @@ import {
   resolveTargetUrl,
   type ProxyConfig,
 } from "@/lib/proxy";
-import type { FlowDsl, FlowNode } from "@/dsl/index.ts";
+import type { CellRef, FlowDsl, FlowNode } from "@/dsl/index.ts";
 import { DomRecorder } from "@/recorder/dom-recorder.ts";
 import {
   importChromeRecorder,
@@ -86,6 +88,7 @@ const RECORD_TYPE_LABEL: Record<string, string> = {
   change: "输入",
   hover: "悬停",
   keydown: "按键",
+  extract: "取值",
 };
 
 const NODE_TYPE_LABEL: Record<FlowNode["type"], string> = {
@@ -118,6 +121,15 @@ function recordedStepLabel(step: ChromeRecorderStep): string {
   if (step.type === "keydown") return `按键 ${step.key ?? ""}`;
   const tokens = parseSelectorGroups(step.selectors);
   return tokens.aria ?? tokens.text ?? tokens.css ?? tokens.xpath ?? "(未定位)";
+}
+
+function cellSummaryLabel(cell: CellRef): string {
+  const row =
+    cell.rowIndex !== undefined
+      ? `筛选后第 ${cell.rowIndex} 行`
+      : cell.rowValue ?? cell.rowText ?? "";
+  const column = cell.header ?? (cell.colIndex ? `第 ${cell.colIndex} 列` : "");
+  return [row, column].filter(Boolean).join(" · ");
 }
 
 function nodeLabel(node: FlowNode): string {
@@ -174,6 +186,7 @@ export function RecordWorkbenchPage() {
     record?.dsl ? "" : "点右上角「开始录制」加载目标页并开始捕获操作。",
   );
   const [recording, setRecording] = useState(false);
+  const [valueMode, setValueMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [frameLoaded, setFrameLoaded] = useState(false);
   const [frameUrl, setFrameUrl] = useState("");
@@ -194,6 +207,16 @@ export function RecordWorkbenchPage() {
     if (!recorderRef.current) {
       recorderRef.current = new DomRecorder({
         onChange: (next) => setSteps(next),
+        onValueModeChange: (armed, reason) => {
+          setValueMode(armed);
+          if (armed) {
+            setStatusText("取值模式：点击右侧目标页要读取的字段，Esc 取消。");
+          } else if (reason === "captured") {
+            setStatusText("已记录取值步骤，可在左侧修改变量名；继续操作或停止生成。");
+          } else {
+            setStatusText("已取消取值模式。");
+          }
+        },
       });
     }
     return recorderRef.current;
@@ -315,6 +338,7 @@ export function RecordWorkbenchPage() {
     const recorder = recorderRef.current;
     const captured = recorder ? recorder.stop() : [];
     setRecording(false);
+    setValueMode(false);
     setSteps(captured);
     if (captured.length === 0) {
       setPhase("empty");
@@ -322,6 +346,85 @@ export function RecordWorkbenchPage() {
       return;
     }
     convert(captured);
+  };
+
+  const toggleValueMode = (): void => {
+    const recorder = recorderRef.current;
+    if (!recorder || !recording) return;
+    if (valueMode) {
+      recorder.cancelValueCapture("canceled");
+      return;
+    }
+    recorder.armValueCapture();
+  };
+
+  /** 改取值步骤的变量名/读取方式时，同步更新录制 JSON 与已生成的 DSL。 */
+  const patchExtractStep = (
+    index: number,
+    patch: {
+      varName?: string;
+      readMode?: "text" | "value" | "attribute";
+      attributeName?: string;
+      cell?: Partial<CellRef>;
+    },
+  ): void => {
+    const { cell, ...rest } = patch;
+    setSteps((current) =>
+      current.map((step, stepIndex) => {
+        if (stepIndex !== index) return step;
+        if (!cell) return { ...step, ...rest };
+        return {
+          ...step,
+          ...rest,
+          semantic: step.semantic
+            ? { ...step.semantic, cell: { ...step.semantic.cell, ...cell } }
+            : step.semantic,
+        };
+      }),
+    );
+    setResult((prev) => {
+      if (!prev) return prev;
+      let changed = false;
+      const nodes = prev.dsl.nodes.map((node) => {
+        if (node.type !== "extract" || node.meta?.sourceIndex !== index) return node;
+        if (node.source === "response" || node.source === "js") return node;
+        changed = true;
+        const strategies = cell
+          ? node.target.strategies.map((strategy) =>
+              strategy.type === "cell"
+                ? { ...strategy, cell: { ...strategy.cell, ...cell } }
+                : strategy,
+            )
+          : node.target.strategies;
+        const cellStrategy = strategies.find((strategy) => strategy.type === "cell");
+        const label =
+          cellStrategy && cellStrategy.type === "cell"
+            ? cellSummaryLabel(cellStrategy.cell)
+            : "";
+        return {
+          ...node,
+          ...(rest.varName !== undefined ? { varName: rest.varName } : {}),
+          ...(rest.readMode !== undefined ? { read: rest.readMode } : {}),
+          ...(rest.readMode !== undefined && rest.readMode !== "attribute"
+            ? { attribute: undefined }
+            : {}),
+          ...(rest.attributeName !== undefined
+            ? { attribute: rest.attributeName.trim() || undefined }
+            : {}),
+          ...(cell
+            ? {
+                ...(label ? { name: `取值 ${label}` } : {}),
+                target: {
+                  ...node.target,
+                  ...(label ? { label } : {}),
+                  strategies,
+                },
+              }
+            : {}),
+        };
+      });
+      return changed ? { ...prev, dsl: { ...prev.dsl, nodes } } : prev;
+    });
   };
 
   const prepareTarget = async (): Promise<Document> => {
@@ -519,6 +622,18 @@ export function RecordWorkbenchPage() {
   const hasDraft = steps.length > 0 || Boolean(result);
   const overrideCount = Object.keys(overrides).length;
 
+  const extractSteps = steps.filter((step) => step.type === "extract");
+  const extractNameCounts = new Map<string, number>();
+  let missingExtractName = false;
+  for (const step of extractSteps) {
+    const name = String(step.varName ?? "").trim();
+    if (!name) missingExtractName = true;
+    else extractNameCounts.set(name, (extractNameCounts.get(name) ?? 0) + 1);
+  }
+  const duplicateExtractNames = [...extractNameCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name);
+
   return (
     <div className="flex flex-col pb-10 xl:h-[calc(100vh-48px)] xl:overflow-hidden xl:pb-0">
       <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
@@ -551,10 +666,19 @@ export function RecordWorkbenchPage() {
             保存记录
           </Button>
           {recording ? (
-            <Button variant="destructive" onClick={stopRecording}>
-              <Square />
-              停止并生成
-            </Button>
+            <>
+              <Button
+                variant={valueMode ? "default" : "outline"}
+                onClick={toggleValueMode}
+              >
+                <Crosshair />
+                {valueMode ? "取消取值" : "录制取值"}
+              </Button>
+              <Button variant="destructive" onClick={stopRecording}>
+                <Square />
+                停止并生成
+              </Button>
+            </>
           ) : (
             <Button onClick={() => void startRecording()} disabled={busy || replaying}>
               {busy ? <Loader2 className="animate-spin" /> : hasDraft ? <RefreshCw /> : <Mic />}
@@ -591,11 +715,12 @@ export function RecordWorkbenchPage() {
             <CardContent className="p-0">
               {steps.length === 0 ? (
                 <p className="px-4 py-7 text-center text-[12px] leading-5 text-muted">
-                  还没有录制事件。开始录制后在右侧目标页完成点击、输入、下拉等操作。
+                  还没有录制事件。开始录制后完成点击、输入、下拉等操作；点「录制取值」再点字段，可把值带入后续记录。
                 </p>
               ) : (
-                <ol className="max-h-[300px] divide-y divide-line overflow-y-auto">
-                  {steps.map((step, index) => (
+                <>
+                  <ol className="max-h-[300px] divide-y divide-line overflow-y-auto">
+                    {steps.map((step, index) => (
                     <li key={`${step.type ?? "step"}-${index}`} className="flex items-start gap-2.5 px-4 py-2">
                       <span className="pt-0.5 font-mono text-[10px] text-muted">
                         {String(index + 1).padStart(2, "0")}
@@ -609,10 +734,116 @@ export function RecordWorkbenchPage() {
                             {recordedStepLabel(step)}
                           </span>
                         </div>
-                        {step.type === "change" && step.value !== undefined ? (
+                        {(step.type === "change" || step.type === "extract") &&
+                        step.value !== undefined ? (
                           <p className="mt-0.5 truncate font-mono text-[10.5px] text-muted">
                             值 {JSON.stringify(step.value)}
                           </p>
+                        ) : null}
+                        {step.type === "extract" ? (
+                          <>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] text-muted">变量</span>
+                            <Input
+                              className={cn(
+                                "h-6 w-[112px] font-mono text-[10.5px]",
+                                !String(step.varName ?? "").trim() && "border-danger",
+                              )}
+                              value={step.varName ?? ""}
+                              disabled={recording}
+                              onChange={(event) =>
+                                patchExtractStep(index, { varName: event.target.value })
+                              }
+                            />
+                            <select
+                              className="tf-select h-6 py-0 text-[10.5px]"
+                              value={step.readMode ?? "text"}
+                              disabled={recording}
+                              onChange={(event) =>
+                                patchExtractStep(index, {
+                                  readMode: event.target.value as
+                                    | "text"
+                                    | "value"
+                                    | "attribute",
+                                })
+                              }
+                            >
+                              <option value="text">文本</option>
+                              <option value="value">表单值</option>
+                              <option value="attribute">属性</option>
+                            </select>
+                            {step.readMode === "attribute" ? (
+                              <Input
+                                className="h-6 w-[96px] font-mono text-[10.5px]"
+                                value={step.attributeName ?? ""}
+                                placeholder="属性名"
+                                disabled={recording}
+                                onChange={(event) =>
+                                  patchExtractStep(index, {
+                                    attributeName: event.target.value,
+                                  })
+                                }
+                              />
+                            ) : null}
+                            <span className="text-[10px] text-muted">执行后带入后续记录</span>
+                          </div>
+                          {step.semantic?.cell ? (
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              <span className="text-[10px] text-muted">行匹配</span>
+                              <select
+                                className="tf-select h-6 py-0 text-[10.5px]"
+                                value={
+                                  step.semantic.cell.rowIndex !== undefined ? "first" : "value"
+                                }
+                                disabled={recording}
+                                onChange={(event) =>
+                                  patchExtractStep(index, {
+                                    cell:
+                                      event.target.value === "first"
+                                        ? { rowIndex: 1 }
+                                        : { rowIndex: undefined },
+                                  })
+                                }
+                              >
+                                <option value="value">按行值</option>
+                                <option value="first">筛选后第一行</option>
+                              </select>
+                              {step.semantic.cell.rowIndex === undefined ? (
+                                <Input
+                                  className="h-6 min-w-[110px] flex-1 font-mono text-[10.5px]"
+                                  value={
+                                    step.semantic.cell.rowValue ??
+                                    step.semantic.cell.rowText ??
+                                    ""
+                                  }
+                                  placeholder="行值或 {{变量}}"
+                                  disabled={recording}
+                                  onChange={(event) => {
+                                    const cell = step.semantic?.cell;
+                                    if (!cell) return;
+                                    patchExtractStep(index, {
+                                      cell:
+                                        cell.rowValue !== undefined ||
+                                        cell.rowText === undefined
+                                          ? {
+                                              rowValue: event.target.value,
+                                              rowIndex: undefined,
+                                            }
+                                          : {
+                                              rowText: event.target.value,
+                                              rowIndex: undefined,
+                                            },
+                                    });
+                                  }}
+                                />
+                              ) : (
+                                <span className="text-[10px] text-muted">
+                                  取筛选结果第 1 行
+                                </span>
+                              )}
+                            </div>
+                          ) : null}
+                          </>
                         ) : null}
                         {step.requests?.length ? (
                           <p className="mt-0.5 truncate font-mono text-[10px] text-moss">
@@ -622,7 +853,21 @@ export function RecordWorkbenchPage() {
                       </div>
                     </li>
                   ))}
-                </ol>
+                  </ol>
+                  {missingExtractName || duplicateExtractNames.length > 0 ? (
+                    <div className="border-t border-amber/20 bg-amber-soft/60 px-4 py-2 text-[10.5px] leading-4 text-amber">
+                      {missingExtractName ? (
+                        <p>有取值步骤缺少变量名，保存后无法在流程中引用。</p>
+                      ) : null}
+                      {duplicateExtractNames.length > 0 ? (
+                        <p>
+                          取值变量重名：{duplicateExtractNames.join("、")}
+                          ，后一个会覆盖前一个。
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </>
               )}
             </CardContent>
           </Card>

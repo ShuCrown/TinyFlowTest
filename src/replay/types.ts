@@ -5,6 +5,33 @@ export interface ReplayHost {
   navigate(url: string, timeoutMs: number): Promise<void>;
   getDocument(): Document;
   getUrl(): string;
+  /** 开始观察目标页网络；不实现时接口取值节点会给出明确错误。 */
+  startNetworkCapture?(): void;
+  /** 等待最近一次（或下一条）匹配的接口响应。 */
+  waitForResponse?(
+    matcher: ResponseMatcher,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<CapturedHttpResponse>;
+  /** 在目标页上下文求值；不支持时 JS 取值节点会失败。 */
+  evaluate?<T = unknown>(expression: string): T | Promise<T>;
+}
+
+export interface ResponseMatcher {
+  /** 不填表示任意方法。 */
+  method?: string;
+  urlContains: string;
+  bodyContains?: string;
+}
+
+export interface CapturedHttpResponse {
+  method: string;
+  url: string;
+  status: number;
+  responseBody: string;
+  requestBody?: string;
+  contentType?: string;
+  capturedAt: number;
 }
 
 export type ReplayStatus = "finished" | "failed" | "canceled";

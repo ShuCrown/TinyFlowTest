@@ -1,18 +1,22 @@
 import type {
   CellControl,
   CellRef,
+  DomExtractNode,
   ExtractNode,
   FlowDsl,
   FlowNode,
   InteractNode,
+  JsExtractNode,
   NavigateNode,
   PickerNode,
+  ResponseExtractNode,
   SignalRef,
   Strategy,
   TargetRef,
   WaitNode,
   WaitSignal,
 } from "../dsl/index.ts";
+import { describeJsonKeys, jsonValueText, pickJsonPath } from "./json-path.ts";
 import {
   isGeneratedId,
   matchElement,
@@ -120,6 +124,13 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
 
   emit({ type: "run.started", totalNodes: dsl.nodes.length });
 
+  // 响应型取值依赖先挂钩子，必须在执行到取值节点之前启动，否则动作触发的响应会漏掉。
+  if (
+    dsl.nodes.some((node) => node.type === "extract" && node.source === "response")
+  ) {
+    host.startNetworkCapture?.();
+  }
+
   while (current) {
     if (signal?.aborted) {
       status = "canceled";
@@ -189,6 +200,7 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
           env,
           node,
           isFirst: index === 0,
+          signal,
           emit,
         });
         const record: ReplayNodeResult = {
@@ -205,6 +217,13 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
         next = nextNode(outgoing.get(node.id));
         break;
       } catch (error) {
+        // 停止按钮会中止等待中的响应/求值；此时不应再进入人工介入。
+        if (signal?.aborted) {
+          status = "canceled";
+          failure = "回放已取消";
+          interrupted = true;
+          break;
+        }
         const record: ReplayNodeResult = {
           nodeId: node.id,
           name: node.name,
@@ -319,6 +338,7 @@ interface ExecuteContext {
   env: Record<string, unknown>;
   node: FlowNode;
   isFirst: boolean;
+  signal?: AbortSignal;
   emit: (event: ReplayEvent) => void;
 }
 
@@ -1038,27 +1058,129 @@ async function executeExtract(
   node: ExtractNode,
   timeoutMs: number,
 ): Promise<NodeOutcome> {
-  const target = await waitForTarget(context.host, node.target, timeoutMs, {
-    requireVisible: true,
-    allowMultiple: false,
-  });
-  const raw = readExtractValue(target.element, node);
+  let strategy: string | undefined;
+  let healed = false;
+  let raw: string;
+  let targetLabel: string;
+
+  if (node.source === "response") {
+    targetLabel = `${node.response.method ?? "ANY"} ${node.response.urlContains}`;
+    raw = await extractResponseValue(context, node, timeoutMs);
+    strategy = "response";
+  } else if (node.source === "js") {
+    targetLabel = "JS 表达式";
+    raw = await extractJsValue(context, node);
+    strategy = "js";
+  } else {
+    targetLabel = node.target.label ?? node.id;
+    // 表格行值可能是 {{变量}}（例如刚创建客户的名称），执行时再解析。
+    const target = resolveCellTemplates(node.target, expressionScope(context));
+    const resolved = await waitForTarget(context.host, target, timeoutMs, {
+      requireVisible: node.includeHidden !== true,
+      allowMultiple: false,
+    });
+    strategy = resolved.strategy;
+    healed = resolved.healed;
+    raw = readExtractValue(resolved.element, node);
+  }
+
   const value = applyExtractPattern(raw, node);
   if (!value) {
-    const message = `取值节点未取到 ${node.varName}: ${node.target.label ?? node.id}`;
-    if (node.optional) return { message: `${message}（已忽略）`, strategy: target.strategy, healed: target.healed };
-    throw new ReplayError(message, target.attempts);
+    const message = `取值节点未取到 ${node.varName}: ${targetLabel}`;
+    if (node.optional) return { message: `${message}（已忽略）`, strategy, healed };
+    throw new ReplayError(message);
   }
   context.env[node.varName] = value;
   context.emit({ type: "var.set", nodeId: node.id, name: node.varName, value });
   return {
     message: `取值 ${node.varName} = ${JSON.stringify(value)}`,
-    strategy: target.strategy,
-    healed: target.healed,
+    strategy,
+    healed,
   };
 }
 
-function readExtractValue(element: Element, node: ExtractNode): string {
+async function extractResponseValue(
+  context: ExecuteContext,
+  node: ResponseExtractNode,
+  timeoutMs: number,
+): Promise<string> {
+  if (!context.host.waitForResponse) {
+    throw new ReplayError("当前回放宿主不支持接口取值");
+  }
+  const scope = expressionScope(context);
+  const matcher = {
+    method: node.response.method?.trim().toUpperCase() || undefined,
+    urlContains: resolveTemplateText(node.response.urlContains, scope),
+    bodyContains: node.response.bodyContains
+      ? resolveTemplateText(node.response.bodyContains, scope)
+      : undefined,
+  };
+  const response = await context.host.waitForResponse(matcher, timeoutMs, context.signal);
+  const path = node.response.path?.trim();
+  if (!path) return response.responseBody;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(response.responseBody);
+  } catch {
+    throw new ReplayError(
+      `接口响应不是合法 JSON: ${response.method} ${response.url}（${response.responseBody.slice(0, 120)}）`,
+    );
+  }
+  const value = pickJsonPath(parsed, path);
+  if (value === undefined) {
+    throw new ReplayError(
+      `接口响应缺少字段 ${path}: ${response.method} ${response.url}（顶层字段：${describeJsonKeys(parsed)}）`,
+    );
+  }
+  return jsonValueText(value);
+}
+
+async function extractJsValue(
+  context: ExecuteContext,
+  node: JsExtractNode,
+): Promise<string> {
+  if (!context.host.evaluate) {
+    throw new ReplayError("当前回放宿主不支持 JS 取值");
+  }
+  let value: unknown;
+  try {
+    value = await context.host.evaluate(node.js);
+  } catch (error) {
+    throw new ReplayError(`JS 取值执行失败: ${errorMessage(error)}`);
+  }
+  return jsonValueText(value);
+}
+
+/** 单元格行值/整行文本里的 {{变量}} 在运行期解析；没有模板就原样返回。 */
+function resolveCellTemplates(
+  target: TargetRef,
+  values: Record<string, unknown>,
+): TargetRef {
+  let changed = false;
+  const strategies = target.strategies.map((strategy) => {
+    if (strategy.type !== "cell") return strategy;
+    const { rowValue, rowText } = strategy.cell;
+    const nextRowValue =
+      rowValue !== undefined && rowValue.includes("{{")
+        ? resolveTemplateText(rowValue, values)
+        : rowValue;
+    const nextRowText =
+      rowText !== undefined && rowText.includes("{{")
+        ? resolveTemplateText(rowText, values)
+        : rowText;
+    if (nextRowValue === rowValue && nextRowText === rowText) return strategy;
+    changed = true;
+    return { ...strategy, cell: { ...strategy.cell, rowValue: nextRowValue, rowText: nextRowText } };
+  });
+  return changed ? { ...target, strategies } : target;
+}
+
+function resolveTemplateText(text: string, values: Record<string, unknown>): string {
+  const resolved = valueFromExpression({ kind: "template", template: text }, values, true);
+  return valueString(resolved);
+}
+
+function readExtractValue(element: Element, node: DomExtractNode): string {
   if (node.read === "value") return readElementValue(element);
   if (node.read === "attribute") {
     const attribute = (node.attribute ?? "").trim();
@@ -1068,7 +1190,10 @@ function readExtractValue(element: Element, node: ExtractNode): string {
   return element.textContent ?? "";
 }
 
-function applyExtractPattern(raw: string, node: ExtractNode): string {
+function applyExtractPattern(
+  raw: string,
+  node: { id: string; pattern?: string },
+): string {
   const text = raw.trim();
   if (!node.pattern) return normalizeText(text);
   let regex: RegExp;
@@ -1817,8 +1942,13 @@ function resolveCellStrategy(root: Document | Element, cell: CellRef): Element[]
       (cell.colIndex === undefined ? undefined : cell.colIndex - 1);
     if (column === undefined) continue;
 
-    for (const row of dataRowsOf(table)) {
-      if (!rowMatches(row, cell, keyColumn)) continue;
+    for (const [rowPosition, row] of dataRowsOf(table).entries()) {
+      // 显式按位置定位（筛选后第一行）时忽略行值；否则按行值/整行文本匹配。
+      if (cell.rowIndex !== undefined) {
+        if (rowPosition + 1 !== cell.rowIndex) continue;
+      } else if (!rowMatches(row, cell, keyColumn)) {
+        continue;
+      }
       const target = row.cells[column];
       if (!target) continue;
       const control = controlIn(target, cell.control);

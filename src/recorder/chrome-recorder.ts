@@ -1,6 +1,7 @@
 import {
   normalizeDsl,
   type CellRef,
+  type ExtractNode,
   type FlowDsl,
   type FlowNode,
   type PickerFilterStep,
@@ -72,6 +73,12 @@ export interface ChromeRecorderStep {
   type?: string;
   selectors?: string[][];
   semantic?: StepSemantic;
+  /** 取值步骤的变量名；录制时自动生成，可在工作台修改。 */
+  varName?: string;
+  /** 取值步骤的读取方式，默认 text。 */
+  readMode?: "text" | "value" | "attribute";
+  /** readMode=attribute 时读取的属性名。 */
+  attributeName?: string;
   /** 该步骤之后短窗口内触发的网络请求（提交接口参数随步骤一起展示）。 */
   requests?: CapturedRequest[];
   /** 事件发生在已可见的弹窗/抽屉内；回放时目标必须限定在该容器里。 */
@@ -244,6 +251,56 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
         meta: { sourceText: `navigate ${raw}`, needsConfirm: false },
       });
       lastTarget = undefined;
+      typedRecently = false;
+      return;
+    }
+
+    if (type === "extract") {
+      const target = targetFromStep(step);
+      if (!target) {
+        skip(type);
+        warn(`第 ${position} 步取值没有可用选择器，已跳过`);
+        return;
+      }
+      const used = new Set(
+        nodes
+          .filter((node): node is ExtractNode => node.type === "extract")
+          .map((node) => node.varName.trim())
+          .filter(Boolean),
+      );
+      let varName = String(step.varName ?? "").trim();
+      if (!varName) {
+        let index = 1;
+        while (used.has(`extracted${index}`)) index += 1;
+        varName = `extracted${index}`;
+        warn(`第 ${position} 步取值缺少变量名，已使用 ${varName}`);
+      } else if (used.has(varName)) {
+        warn(`第 ${position} 步取值的变量 ${varName} 重复，后一个会覆盖前一个，请在录制页重命名`);
+      }
+      const read =
+        step.readMode === "value" || step.readMode === "attribute" ? step.readMode : "text";
+      const attribute =
+        read === "attribute" ? String(step.attributeName ?? "").trim() || undefined : undefined;
+      if (read === "attribute" && !attribute) {
+        warn(`第 ${position} 步取值选择属性读取但缺少属性名，需要补充`);
+      }
+      nodes.push({
+        id: nextId("extract"),
+        type: "extract",
+        name: `取值 ${target.label ?? varName}`,
+        system: system.id,
+        source: "dom",
+        target,
+        read,
+        ...(attribute ? { attribute } : {}),
+        varName,
+        meta: {
+          sourceText: "extract",
+          needsConfirm: read === "attribute" && !attribute,
+          sourceIndex: index,
+        },
+      });
+      lastTarget = target;
       typedRecently = false;
       return;
     }
@@ -841,7 +898,9 @@ function withDialogScope(target: TargetRef | null, step: ChromeRecorderStep): Ta
 
 function cellStrategies(cell: CellRef): Strategy[] {
   const rows: Array<Partial<CellRef>> = [];
-  if (cell.rowValue !== undefined) {
+  if (cell.rowIndex !== undefined) {
+    rows.push({ rowIndex: cell.rowIndex });
+  } else if (cell.rowValue !== undefined) {
     const row: Partial<CellRef> = { rowValue: cell.rowValue };
     if (cell.keyHeader) row.keyHeader = cell.keyHeader;
     if (cell.keyIndex !== undefined) row.keyIndex = cell.keyIndex;
@@ -866,9 +925,11 @@ function cellStrategies(cell: CellRef): Strategy[] {
 }
 
 function cellLabel(cell: CellRef): string {
-  return [cell.rowValue ?? cell.rowText, cell.header ?? `第 ${cell.colIndex ?? "?"} 列`]
-    .filter(Boolean)
-    .join(" · ");
+  const row =
+    cell.rowIndex !== undefined
+      ? `筛选后第 ${cell.rowIndex} 行`
+      : cell.rowValue ?? cell.rowText;
+  return [row, cell.header ?? `第 ${cell.colIndex ?? "?"} 列`].filter(Boolean).join(" · ");
 }
 
 /**

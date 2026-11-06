@@ -1,4 +1,4 @@
-import type { FlowDsl } from "../dsl/index.ts";
+import type { CellRef, FlowDsl } from "../dsl/index.ts";
 import type { ChromeRecorderRecording, RecordingImportReport } from "../recorder/chrome-recorder.ts";
 
 export interface TargetSystem {
@@ -42,17 +42,41 @@ export interface FlowRecordNode {
 
 export type ExtractRead = "text" | "value" | "attribute";
 
+/** 取值来源：页面 DOM / 接口响应 / 页面 JS 表达式。 */
+export type ExtractSourceKind = "dom" | "response" | "js";
+
+export interface ExtractResponseConfig {
+  /** 不填表示任意方法。 */
+  method?: string;
+  urlContains: string;
+  bodyContains?: string;
+  /** JSON 路径；留空表示整段响应文本。 */
+  path?: string;
+}
+
 export interface FlowExtractNode {
   id: string;
   kind: "extract";
   varName: string;
+  /** 缺省 dom。 */
+  source?: ExtractSourceKind;
   read: ExtractRead;
   /** read=attribute 时读取的属性名。 */
   attribute?: string;
   /** 可选清洗正则，捕获组优先。 */
   pattern?: string;
-  /** v1 用 CSS 选择器定位当前页面的编号元素。 */
+  /** DOM 来源：v1 用 CSS 选择器定位当前页面的编号元素。 */
   selector: string;
+  /** DOM 来源的定位方式；缺省 css。 */
+  locate?: "css" | "cell";
+  /** locate=cell 时的表格地址；行值支持 {{变量名}}。 */
+  cell?: CellRef;
+  /** 目标不可见时仍读取（隐藏输入、JSON script 等）。 */
+  includeHidden?: boolean;
+  /** source=response 时的接口匹配与取值配置。 */
+  response?: ExtractResponseConfig;
+  /** source=js 时在目标页上下文执行的表达式。 */
+  js?: string;
   enabled?: boolean;
   x: number;
   y: number;
