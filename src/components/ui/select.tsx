@@ -22,21 +22,26 @@ function SelectTrigger({
   children,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
-  size?: "sm" | "default";
+  size?: "xs" | "sm" | "default";
 }) {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-full items-center justify-between gap-2 whitespace-nowrap rounded-[9px] border border-line bg-white px-3 py-2 text-[13px] text-ink transition-[border-color,box-shadow] outline-none focus-visible:border-accent/55 focus-visible:ring-[3px] focus-visible:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-9 data-[size=sm]:h-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "flex w-full items-center justify-between whitespace-nowrap rounded-[9px] border border-line bg-white text-ink transition-[border-color,box-shadow] outline-none focus-visible:border-accent/55 focus-visible:ring-[3px] focus-visible:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        size === "default" && "h-9 gap-2 px-3 text-[13px]",
+        size === "sm" && "h-8 gap-1.5 px-2.5 text-[12px]",
+        size === "xs" && "h-7 gap-1 px-2 text-[11px]",
         className,
       )}
       {...props}
     >
       {children}
       <SelectPrimitive.Icon asChild>
-        <ChevronDown className="size-4 text-muted" />
+        <ChevronDown
+          className={cn("text-muted", size === "default" ? "size-4" : "size-3.5")}
+        />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );

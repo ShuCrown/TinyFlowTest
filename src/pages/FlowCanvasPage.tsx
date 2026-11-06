@@ -41,8 +41,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { FlowRunDialog } from "@/components/FlowRunDialog";
 import { ExtractRecorderDialog } from "@/components/ExtractRecorderDialog";
+import { RecordReplayDialog } from "@/components/RecordReplayDialog";
 import {
   describeExtractNode,
   type ExtractRecordingApplied,
@@ -337,6 +345,7 @@ export function FlowCanvasPage() {
   const [runOpen, setRunOpen] = useState(false);
   const [recorderOpen, setRecorderOpen] = useState(false);
   const [recordingNodeId, setRecordingNodeId] = useState<string | null>(null);
+  const [replayRecordId, setReplayRecordId] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("");
   const instanceRef = useRef<ReactFlowInstance<FlowRfNode, Edge> | null>(null);
 
@@ -371,6 +380,7 @@ export function FlowCanvasPage() {
           node.id === recordingNodeId && node.kind === "extract",
       )
     : undefined;
+  const replayRecord = replayRecordId ? recordMap.get(replayRecordId) : undefined;
   const availableVars = useMemo(() => {
     const names = new Set<string>();
     for (const name of extractVars(graph)) names.add(name);
@@ -1034,6 +1044,7 @@ export function FlowCanvasPage() {
                 vars={availableVars}
                 onPatch={(patch) => patchNode(selected.id, patch)}
                 onDelete={() => removeNode(selected.id)}
+                onReplay={() => setReplayRecordId(selected.recordId)}
                 onSlotSource={(slot, mode, value) => setSlotSource(selected.id, slot, mode, value)}
                 onRenameVar={renameNodeVar}
               />
@@ -1089,6 +1100,14 @@ export function FlowCanvasPage() {
             if (!next) setRecordingNodeId(null);
           }}
           onApply={applyExtractRecording}
+        />
+      ) : null}
+
+      {replayRecord ? (
+        <RecordReplayDialog
+          open
+          record={replayRecord}
+          onClose={() => setReplayRecordId(null)}
         />
       ) : null}
     </div>
@@ -1169,6 +1188,7 @@ function RecordInspector({
   vars,
   onPatch,
   onDelete,
+  onReplay,
   onSlotSource,
   onRenameVar,
 }: {
@@ -1178,6 +1198,7 @@ function RecordInspector({
   vars: string[];
   onPatch: (patch: Partial<FlowRecordNode>) => void;
   onDelete: () => void;
+  onReplay: () => void;
   onSlotSource: (slot: RecordSlot, mode: SlotsMode, value?: string) => void;
   onRenameVar: (key: string, recordedName: string, oldName: string, nextName: string) => void;
 }) {
@@ -1218,12 +1239,16 @@ function RecordInspector({
           {node.enabled === false ? <Power /> : <Ban />}
           {node.enabled === false ? "启用记录" : "禁用记录"}
         </Button>
-        <Link to={`/records/${record.id}/record`}>
-          <Button size="sm" variant="ghost">
-            <Mic />
-            打开录制
-          </Button>
-        </Link>
+        <Button
+          size="sm"
+          variant="default"
+          onClick={onReplay}
+          disabled={!record.dsl}
+          title={record.dsl ? undefined : "这条记录还没有可执行节点"}
+        >
+          <Play />
+          回放
+        </Button>
       </div>
 
       {recordExtracts.length > 0 ? (
@@ -1303,7 +1328,7 @@ function RecordInspector({
         )}
 
         <p className="mt-2 text-[10.5px] leading-4 text-muted">
-          环境变量注入只在本流程「运行流程」时生效；录制页的「开始回放」只使用记录自己的录制值/微调值。
+          环境变量注入只在本流程「运行流程」时生效；画布「回放」和录制页的「开始回放」只使用记录自己的录制值/微调值。
         </p>
 
         {filterlessPickers.length > 0 ? (
@@ -1356,15 +1381,19 @@ function SlotEditor({
       </div>
 
       <div className="mt-1.5 grid grid-cols-[88px_minmax(0,1fr)] items-center gap-1.5">
-        <select
-          className="tf-select h-7 py-1 text-[11px]"
+        <Select
           value={mode}
-          onChange={(event) => onChange(event.target.value as SlotsMode)}
+          onValueChange={(next) => onChange(next as SlotsMode)}
         >
-          <option value="recorded">录制值</option>
-          <option value="literal">字面值</option>
-          <option value="var">环境变量</option>
-        </select>
+          <SelectTrigger size="xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="recorded">录制值</SelectItem>
+            <SelectItem value="literal">字面值</SelectItem>
+            <SelectItem value="var">环境变量</SelectItem>
+          </SelectContent>
+        </Select>
 
         {mode === "literal" ? (
           <Input
@@ -1374,18 +1403,18 @@ function SlotEditor({
             onChange={(event) => onChange("literal", event.target.value)}
           />
         ) : mode === "var" ? (
-          <select
-            className="tf-select h-7 py-1 text-[11px]"
-            value={value}
-            onChange={(event) => onChange("var", event.target.value)}
-          >
-            <option value="">选择变量</option>
-            {vars.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+          <Select value={value} onValueChange={(next) => onChange("var", next)}>
+            <SelectTrigger size="xs">
+              <SelectValue placeholder="选择变量" />
+            </SelectTrigger>
+            <SelectContent>
+              {vars.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         ) : (
           <span className="truncate text-[10.5px] text-muted">使用录制时的值</span>
         )}

@@ -1,4 +1,11 @@
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { CellRef, ExtractNode } from "@/dsl/index.ts";
 import type { ExtractRead, ExtractTuning } from "@/lib/types";
 import { readExtractTuning } from "@/flow/extract-tuning";
@@ -216,17 +223,19 @@ export function ExtractTuningFields({
       <div className="grid gap-1.5">
         <div className="flex items-center gap-1.5">
           <span className="w-14 shrink-0 text-[10.5px] text-muted">读取</span>
-          <select
-            className="tf-select h-7 min-w-0 flex-1 py-0 text-[11px]"
+          <Select
             value={editor.read}
-            onChange={(event) =>
-              onChange({ ...editor, read: event.target.value as ExtractRead })
-            }
+            onValueChange={(next) => onChange({ ...editor, read: next as ExtractRead })}
           >
-            <option value="text">文本</option>
-            <option value="value">表单值</option>
-            <option value="attribute">属性</option>
-          </select>
+            <SelectTrigger size="xs" className="min-w-0 flex-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="text">文本</SelectItem>
+              <SelectItem value="value">表单值</SelectItem>
+              <SelectItem value="attribute">属性</SelectItem>
+            </SelectContent>
+          </Select>
           {editor.read === "attribute" ? (
             <Input
               className="h-7 min-w-0 flex-1 text-[11px]"
@@ -241,17 +250,21 @@ export function ExtractTuningFields({
         {editor.locate === "cell" ? (
           <div className="flex items-center gap-1.5">
             <span className="w-14 shrink-0 text-[10.5px] text-muted">行匹配</span>
-            <select
-              className="tf-select h-7 w-[110px] py-0 text-[11px]"
+            <Select
               value={editor.rowMode}
-              onChange={(event) =>
-                onChange({ ...editor, rowMode: event.target.value as DomRowMode })
+              onValueChange={(next) =>
+                onChange({ ...editor, rowMode: next as DomRowMode })
               }
             >
-              <option value="rowValue">按行值</option>
-              <option value="rowText">按整行文本</option>
-              <option value="rowIndex">第 N 行</option>
-            </select>
+              <SelectTrigger size="xs" className="w-[110px] shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="rowValue">按行值</SelectItem>
+                <SelectItem value="rowText">按整行文本</SelectItem>
+                <SelectItem value="rowIndex">第 N 行</SelectItem>
+              </SelectContent>
+            </Select>
             {editor.rowMode === "rowIndex" ? (
               <Input
                 type="number"

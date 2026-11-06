@@ -13,6 +13,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogBody,
   DialogContent,
@@ -329,22 +336,25 @@ const ExtractRecorderDialog = ({
             ) : (
               <>
                 <Field label="目标系统">
-                  <select
-                    className="tf-select h-9 py-1 text-[12.5px]"
+                  <Select
                     value={systemId}
-                    onChange={(event) => {
-                      const nextId = event.target.value;
+                    onValueChange={(nextId) => {
                       setSystemId(nextId);
                       const system = enabledSystems.find((item) => item.id === nextId);
                       setTargetUrl(system?.baseUrl ?? "");
                     }}
                   >
-                    {enabledSystems.map((system) => (
-                      <option key={system.id} value={system.id}>
-                        {system.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择目标系统" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {enabledSystems.map((system) => (
+                        <SelectItem key={system.id} value={system.id}>
+                          {system.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="目标地址" hint="默认使用系统的入口地址，可改成具体页面。">
                   <Input

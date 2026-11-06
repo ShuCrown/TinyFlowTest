@@ -16,6 +16,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -75,6 +82,8 @@ interface RunItem {
 }
 
 type PickerStrategy = "byText" | "byRow" | "byIndex" | "firstVisible";
+
+const FOLLOW_CANVAS = "__canvas__";
 
 interface PickerDraft {
   strategy: PickerStrategy;
@@ -1086,16 +1095,22 @@ function InteractTuningRows({
       </TableCell>
       <TableCell className="px-2 py-1.5">
         {isCheck ? (
-          <select
-            className="tf-select h-7 py-1 text-[11px]"
-            value={value ?? ""}
+          <Select
+            value={value ? value : FOLLOW_CANVAS}
             disabled={disabled}
-            onChange={(event) => onChange(microId, event.target.value)}
+            onValueChange={(next) =>
+              onChange(microId, next === FOLLOW_CANVAS ? "" : next)
+            }
           >
-            <option value="">跟随画布（{fallback}）</option>
-            <option value="true">回放时勾选</option>
-            <option value="false">回放时取消</option>
-          </select>
+            <SelectTrigger size="xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FOLLOW_CANVAS}>跟随画布（{fallback}）</SelectItem>
+              <SelectItem value="true">回放时勾选</SelectItem>
+              <SelectItem value="false">回放时取消</SelectItem>
+            </SelectContent>
+          </Select>
         ) : (
           <Input
             className="h-7 text-[11.5px]"
@@ -1236,18 +1251,22 @@ function PickerTuningRows({
     key: "strategy",
     option: "定位方式",
     control: (
-      <select
-        className="tf-select h-7 py-1 text-[11px]"
+      <Select
         value={draft.strategy}
         disabled={disabled}
-        onChange={(event) => changeStrategy(event.target.value as PickerStrategy)}
+        onValueChange={(next) => changeStrategy(next as PickerStrategy)}
       >
-        {(Object.keys(PICKER_STRATEGY_LABEL) as PickerStrategy[]).map((strategy) => (
-          <option key={strategy} value={strategy}>
-            {PICKER_STRATEGY_LABEL[strategy]}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger size="xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {(Object.keys(PICKER_STRATEGY_LABEL) as PickerStrategy[]).map((strategy) => (
+            <SelectItem key={strategy} value={strategy}>
+              {PICKER_STRATEGY_LABEL[strategy]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     ),
     reset: () =>
       patch({
@@ -1320,15 +1339,19 @@ function PickerTuningRows({
       key: "on",
       option: "点击目标",
       control: (
-        <select
-          className="tf-select h-7 py-1 text-[11px]"
+        <Select
           value={draft.on}
           disabled={disabled}
-          onChange={(event) => patch({ on: event.target.value as "item" | "row" })}
+          onValueChange={(next) => patch({ on: next as "item" | "row" })}
         >
-          <option value="item">选项本身</option>
-          <option value="row">表格行</option>
-        </select>
+          <SelectTrigger size="xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="item">选项本身</SelectItem>
+            <SelectItem value="row">表格行</SelectItem>
+          </SelectContent>
+        </Select>
       ),
       reset: () => patch({ on: defaultDraft.on }),
     });
@@ -1343,15 +1366,19 @@ function PickerTuningRows({
       key: "on",
       option: "点击目标",
       control: (
-        <select
-          className="tf-select h-7 py-1 text-[11px]"
+        <Select
           value={draft.on}
           disabled={disabled}
-          onChange={(event) => patch({ on: event.target.value as "item" | "row" })}
+          onValueChange={(next) => patch({ on: next as "item" | "row" })}
         >
-          <option value="item">选项本身</option>
-          <option value="row">表格行</option>
-        </select>
+          <SelectTrigger size="xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="item">选项本身</SelectItem>
+            <SelectItem value="row">表格行</SelectItem>
+          </SelectContent>
+        </Select>
       ),
       reset: () => patch({ on: defaultDraft.on }),
     });

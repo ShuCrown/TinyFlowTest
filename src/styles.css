@@ -95,7 +95,6 @@ body {
   }
 
   .tf-input,
-  .tf-select,
   .tf-textarea {
     width: 100%;
     border: 1px solid var(--color-line);
@@ -113,7 +112,6 @@ body {
   }
 
   .tf-input:focus,
-  .tf-select:focus,
   .tf-textarea:focus {
     border-color: rgba(193, 75, 42, 0.55);
     box-shadow: 0 0 0 3px rgba(193, 75, 42, 0.1);

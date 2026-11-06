@@ -19,6 +19,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { NodeTuningDialog } from "@/components/NodeTuningDialog";
 import { cn } from "@/lib/utils";
 import { getRecord, getSystemToken, listSystems, saveRecord, saveSystemToken } from "@/lib/store";
@@ -738,23 +745,27 @@ export function RecordWorkbenchPage() {
                                 patchExtractStep(index, { varName: event.target.value })
                               }
                             />
-                            <select
-                              className="tf-select h-6 py-0 text-[10.5px]"
+                            <Select
                               value={step.readMode ?? "text"}
                               disabled={recording}
-                              onChange={(event) =>
+                              onValueChange={(next) =>
                                 patchExtractStep(index, {
-                                  readMode: event.target.value as
-                                    | "text"
-                                    | "value"
-                                    | "attribute",
+                                  readMode: next as "text" | "value" | "attribute",
                                 })
                               }
                             >
-                              <option value="text">文本</option>
-                              <option value="value">表单值</option>
-                              <option value="attribute">属性</option>
-                            </select>
+                              <SelectTrigger
+                                size="xs"
+                                className="h-6 w-auto text-[10.5px]"
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="text">文本</SelectItem>
+                                <SelectItem value="value">表单值</SelectItem>
+                                <SelectItem value="attribute">属性</SelectItem>
+                              </SelectContent>
+                            </Select>
                             {step.readMode === "attribute" ? (
                               <Input
                                 className="h-6 w-[96px] font-mono text-[10.5px]"
@@ -773,24 +784,31 @@ export function RecordWorkbenchPage() {
                           {step.semantic?.cell ? (
                             <div className="mt-1 flex flex-wrap items-center gap-1.5">
                               <span className="text-[10px] text-muted">行匹配</span>
-                              <select
-                                className="tf-select h-6 py-0 text-[10.5px]"
+                              <Select
                                 value={
                                   step.semantic.cell.rowIndex !== undefined ? "first" : "value"
                                 }
                                 disabled={recording}
-                                onChange={(event) =>
+                                onValueChange={(next) =>
                                   patchExtractStep(index, {
                                     cell:
-                                      event.target.value === "first"
+                                      next === "first"
                                         ? { rowIndex: 1 }
                                         : { rowIndex: undefined },
                                   })
                                 }
                               >
-                                <option value="value">按行值</option>
-                                <option value="first">筛选后第一行</option>
-                              </select>
+                                <SelectTrigger
+                                  size="xs"
+                                  className="h-6 w-auto text-[10.5px]"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="value">按行值</SelectItem>
+                                  <SelectItem value="first">筛选后第一行</SelectItem>
+                                </SelectContent>
+                              </Select>
                               {step.semantic.cell.rowIndex === undefined ? (
                                 <Input
                                   className="h-6 min-w-[110px] flex-1 font-mono text-[10.5px]"
