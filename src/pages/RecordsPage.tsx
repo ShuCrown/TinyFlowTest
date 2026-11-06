@@ -1,18 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import {
-  CheckCircle2,
-  FileText,
-  Layers,
-  ListOrdered,
-  Mic,
-  Pencil,
-  Plus,
-  Save,
-  Trash2,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { Mic, Pencil, Plus, Save, Trash2, TriangleAlert, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -26,7 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogBody,
@@ -45,19 +33,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 import { deleteRecord, formatTime, listRecords, listSystems, newId, saveRecord } from "@/lib/store";
 import type { OperationRecord, TargetSystem } from "@/lib/types";
-import { PageHeader } from "../components/ui";
+import { ItemCard, PageHeader } from "../components/ui";
 
 type RecordDraft = Pick<OperationRecord, "name" | "systemId" | "targetUrl" | "description">;
 
@@ -232,49 +211,6 @@ function RecordDialog({
   );
 }
 
-const STAT_TONES = {
-  neutral: "border-line bg-ink/[0.03] text-muted",
-  accent: "border-accent/20 bg-accent-soft text-accent",
-  moss: "border-moss/20 bg-moss-soft text-moss",
-  amber: "border-amber/20 bg-amber-soft text-amber",
-} as const;
-
-function StatCard({
-  label,
-  value,
-  hint,
-  icon: Icon,
-  tone,
-}: {
-  label: string;
-  value: string | number;
-  hint: string;
-  icon: typeof FileText;
-  tone: keyof typeof STAT_TONES;
-}) {
-  return (
-    <Card className="gap-0">
-      <CardContent className="px-4 py-3.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
-            {label}
-          </span>
-          <span
-            className={cn(
-              "grid size-6 shrink-0 place-items-center rounded-md border",
-              STAT_TONES[tone],
-            )}
-          >
-            <Icon className="size-3.5" />
-          </span>
-        </div>
-        <div className="mt-1 text-[22px] font-semibold leading-tight tracking-tight">{value}</div>
-        <div className="mt-1 text-[11.5px] leading-4 text-muted">{hint}</div>
-      </CardContent>
-    </Card>
-  );
-}
-
 const EMPTY_STEPS: Array<[string, string, string]> = [
   ["01", "建立记录", "选择目标系统，命名这次操作。"],
   ["02", "录制操作", "在目标页完成一次真实业务操作。"],
@@ -294,10 +230,6 @@ export function RecordsPage() {
     for (const system of systems) names.set(system.id, system.name);
     return names;
   }, [systems]);
-
-  const totalSteps = records.reduce((total, record) => total + record.steps, 0);
-  const totalNodes = records.reduce((total, record) => total + record.nodes, 0);
-  const readyCount = records.filter((record) => record.status === "ready").length;
 
   const openCreate = (): void => {
     setEditing(null);
@@ -360,37 +292,6 @@ export function RecordsPage() {
         }
       />
 
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          label="RECORDS"
-          value={records.length}
-          hint="已建立的记录"
-          icon={FileText}
-          tone="accent"
-        />
-        <StatCard
-          label="STEPS"
-          value={totalSteps}
-          hint="录制步骤总数"
-          icon={ListOrdered}
-          tone="neutral"
-        />
-        <StatCard
-          label="NODES"
-          value={totalNodes}
-          hint="转换后的节点总数"
-          icon={Layers}
-          tone="moss"
-        />
-        <StatCard
-          label="READY"
-          value={readyCount}
-          hint="已保存录制结果的记录"
-          icon={CheckCircle2}
-          tone="amber"
-        />
-      </div>
-
       {records.length === 0 ? (
         <Card className="mt-5 gap-0 border-dashed bg-panel/60 shadow-none">
           <CardContent className="flex flex-col items-center px-6 py-12 text-center">
@@ -417,90 +318,53 @@ export function RecordsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="mt-5 gap-0 overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-3">
-            <div className="flex items-center gap-2">
-              <CardTitle>记录清单</CardTitle>
-              <Badge variant="secondary">{records.length}</Badge>
-            </div>
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
-              localStorage · 本机保存
-            </span>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>记录</TableHead>
-                  <TableHead>目标系统</TableHead>
-                  <TableHead>步骤</TableHead>
-                  <TableHead>节点</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>更新时间</TableHead>
-                  <TableHead className="w-[1%] whitespace-nowrap text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {records.map((record) => (
-                  <TableRow key={record.id}>
-                    <TableCell>
-                      <div className="font-semibold">{record.name}</div>
-                      {record.description ? (
-                        <div className="mt-0.5 line-clamp-1 text-[11.5px] text-muted">
-                          {record.description}
-                        </div>
-                      ) : null}
-                      <div className="mt-0.5 max-w-[320px] truncate font-mono text-[10.5px] text-muted/80">
-                        {record.targetUrl}
-                      </div>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-[12px]">
-                      {record.systemId ? (
-                        (systemNames.get(record.systemId) ?? "系统已删除")
-                      ) : (
-                        <span className="text-muted">未绑定</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="font-mono text-[12px]">{record.steps}</TableCell>
-                    <TableCell className="font-mono text-[12px]">{record.nodes}</TableCell>
-                    <TableCell>
-                      <Badge variant={record.status === "ready" ? "moss" : "amber"}>
-                        {record.status === "ready" ? "已录制" : "待录制"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-[12px] text-muted">
-                      {formatTime(record.updatedAt)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => navigate(`/records/${record.id}/record`)}
-                        >
-                          <Mic className="size-3.5" />
-                          录制
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => openEdit(record)}>
-                          <Pencil className="size-3.5" />
-                          编辑
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => setDeleting(record)}
-                        >
-                          <Trash2 className="size-3.5" />
-                          删除
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {records.map((record) => (
+            <ItemCard
+              key={record.id}
+              code={`REC-${record.id.slice(-4).toUpperCase()}`}
+              title={record.name}
+              badge={
+                <Badge variant={record.status === "ready" ? "moss" : "amber"}>
+                  {record.status === "ready" ? "已录制" : "待录制"}
+                </Badge>
+              }
+              actions={
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => navigate(`/records/${record.id}/record`)}
+                  >
+                    <Mic className="size-3.5" />
+                    录制
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => openEdit(record)}>
+                    <Pencil className="size-3.5" />
+                    编辑
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => setDeleting(record)}>
+                    <Trash2 className="size-3.5" />
+                    删除
+                  </Button>
+                </>
+              }
+            >
+              {record.description ? <div className="line-clamp-1">{record.description}</div> : null}
+              <div className="truncate">
+                目标系统：
+                {record.systemId ? (systemNames.get(record.systemId) ?? "系统已删除") : "未绑定"}
+              </div>
+              <div className="font-mono">
+                步骤 {record.steps} · 节点 {record.nodes}
+              </div>
+              <div className="truncate font-mono text-[10.5px]" title={record.targetUrl}>
+                {record.targetUrl}
+              </div>
+              <div>{formatTime(record.updatedAt)}</div>
+            </ItemCard>
+          ))}
+        </section>
       )}
 
       {dialogOpen ? (

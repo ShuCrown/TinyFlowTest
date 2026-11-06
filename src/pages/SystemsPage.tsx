@@ -3,16 +3,7 @@ import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Dialog, EmptyState, Field, PageHeader, StatCard } from "../components/ui";
+import { Dialog, EmptyState, Field, ItemCard, PageHeader } from "../components/ui";
 import {
   deleteSystem,
   formatTime,
@@ -183,18 +174,11 @@ export function SystemsPage() {
     return counts;
   }, [records]);
 
-  const enabledCount = systems.filter((system) => system.enabled).length;
-  const linkedRecords = records.filter((record) =>
-    systems.some((system) => system.id === record.systemId),
-  ).length;
-  const lastUpdated = systems[0] ? new Date(systems[0].updatedAt).toLocaleDateString("zh-CN") : "—";
-
   const sessionTokens = useMemo(() => {
     const tokens = new Map<string, boolean>();
     for (const system of systems) tokens.set(system.id, Boolean(getSystemToken(system.id)));
     return tokens;
   }, [systems]);
-  const tokenCount = systems.filter((system) => sessionTokens.get(system.id)).length;
 
   const openCreate = (): void => {
     setEditing(null);
@@ -239,13 +223,6 @@ export function SystemsPage() {
         }
       />
 
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="SYSTEMS" value={systems.length} hint="已登记的被测系统" tone="accent" />
-        <StatCard label="ENABLED" value={enabledCount} hint="当前启用" tone="moss" />
-        <StatCard label="RECORDS" value={linkedRecords} hint="绑定到系统的操作记录" />
-        <StatCard label="UPDATED" value={lastUpdated} hint="最近一次系统配置更新" tone="amber" />
-      </div>
-
       {systems.length === 0 ? (
         <div className="mt-5">
           <EmptyState
@@ -261,82 +238,44 @@ export function SystemsPage() {
           />
         </div>
       ) : (
-        <Card className="mt-5 gap-0 overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-3">
-            <div className="flex items-center gap-2">
-              <CardTitle>系统清单</CardTitle>
-              <Badge variant="secondary">{systems.length}</Badge>
-              <Badge variant={tokenCount ? "moss" : "secondary"}>
-                Token {tokenCount}/{systems.length}
-              </Badge>
-            </div>
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
-              meta · localStorage / token · sessionStorage
-            </span>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>系统</TableHead>
-                  <TableHead>目标地址</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>Token</TableHead>
-                  <TableHead>关联记录</TableHead>
-                  <TableHead>更新时间</TableHead>
-                  <TableHead className="w-[1%] whitespace-nowrap text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {systems.map((system) => (
-                  <TableRow key={system.id}>
-                    <TableCell>
-                      <div className="font-semibold">{system.name}</div>
-                      {system.description ? (
-                        <div className="mt-0.5 line-clamp-1 text-[11.5px] text-muted">
-                          {system.description}
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="max-w-[320px]">
-                      <div className="truncate font-mono text-[11.5px] text-muted" title={system.baseUrl}>
-                        {system.baseUrl}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={system.enabled ? "moss" : "secondary"}>
-                        {system.enabled ? "启用" : "停用"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={sessionTokens.get(system.id) ? "moss" : "secondary"}>
-                        {sessionTokens.get(system.id) ? "本会话" : "未配置"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-[12px]">
-                      {recordCounts.get(system.id) ?? 0}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-[12px] text-muted">
-                      {formatTime(system.updatedAt)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-1.5">
-                        <Button size="sm" variant="outline" onClick={() => openEdit(system)}>
-                          <Pencil className="size-3.5" />
-                          编辑
-                        </Button>
-                        <Button size="sm" variant="destructive" onClick={() => handleDelete(system)}>
-                          <Trash2 className="size-3.5" />
-                          删除
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {systems.map((system) => (
+            <ItemCard
+              key={system.id}
+              code={`SYS-${system.id.slice(-4).toUpperCase()}`}
+              title={system.name}
+              badge={
+                <Badge variant={system.enabled ? "moss" : "secondary"}>
+                  {system.enabled ? "启用" : "停用"}
+                </Badge>
+              }
+              actions={
+                <>
+                  <Button size="sm" variant="outline" onClick={() => openEdit(system)}>
+                    <Pencil className="size-3.5" />
+                    编辑
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => handleDelete(system)}>
+                    <Trash2 className="size-3.5" />
+                    删除
+                  </Button>
+                </>
+              }
+            >
+              <div className="truncate font-mono text-[11px]" title={system.baseUrl}>
+                {system.baseUrl}
+              </div>
+              {system.description ? <div className="line-clamp-1">{system.description}</div> : null}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge variant={sessionTokens.get(system.id) ? "moss" : "secondary"}>
+                  {sessionTokens.get(system.id) ? "Token 本会话" : "Token 未配置"}
+                </Badge>
+                <span>关联 {recordCounts.get(system.id) ?? 0} 条</span>
+              </div>
+              <div>{formatTime(system.updatedAt)}</div>
+            </ItemCard>
+          ))}
+        </section>
       )}
 
       {dialogOpen ? (

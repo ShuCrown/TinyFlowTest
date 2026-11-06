@@ -4,7 +4,7 @@ import { Pencil, Plus, Save, Trash2, Workflow, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, EmptyState, Field, PageHeader, StatCard } from "../components/ui";
+import { Dialog, EmptyState, Field, ItemCard, PageHeader } from "../components/ui";
 import { deleteFlow, formatTime, listFlows, newId, saveFlow } from "../lib/store";
 import type { FlowItem } from "../lib/types";
 
@@ -93,10 +93,6 @@ export function FlowsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<FlowItem | null>(null);
 
-  const draftCount = flows.filter((flow) => flow.status === "draft").length;
-  const readyCount = flows.filter((flow) => flow.status === "ready").length;
-  const totalRecords = flows.reduce((total, flow) => total + flow.recordCount, 0);
-
   const openCreate = (): void => {
     setEditing(null);
     setDialogOpen(true);
@@ -148,13 +144,6 @@ export function FlowsPage() {
         }
       />
 
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="FLOWS" value={flows.length} hint="已建立的流程" tone="accent" />
-        <StatCard label="DRAFT" value={draftCount} hint="还在编排中的流程" tone="amber" />
-        <StatCard label="READY" value={readyCount} hint="可执行流程" tone="moss" />
-        <StatCard label="RECORDS" value={totalRecords} hint="流程内操作记录数" />
-      </div>
-
       {flows.length === 0 ? (
         <div className="mt-5">
           <EmptyState
@@ -190,49 +179,42 @@ export function FlowsPage() {
           </EmptyState>
         </div>
       ) : (
-        <section className="mt-5 grid gap-3 md:grid-cols-2">
+        <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {flows.map((flow) => (
-            <article key={flow.id} className="tf-panel flex flex-col p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
-                    {flowCode(flow.id)}
-                  </div>
-                  <h2 className="mt-1 truncate text-[15px] font-semibold tracking-tight">
-                    {flow.name}
-                  </h2>
-                </div>
+            <ItemCard
+              key={flow.id}
+              code={flowCode(flow.id)}
+              title={flow.name}
+              badge={
                 <Badge variant={flow.status === "ready" ? "moss" : "amber"}>
                   {flow.status === "ready" ? "可运行" : "草稿"}
                 </Badge>
-              </div>
-
-              <p className="mt-2 line-clamp-2 min-h-[38px] text-[12px] leading-5 text-muted">
-                {flow.description || "暂无说明。"}
-              </p>
-
-              <div className="mt-4 flex items-center justify-between gap-2 border-t border-line pt-3">
-                <span className="font-mono text-[10.5px] text-muted">
-                  {flow.recordCount} 条操作记录
-                </span>
-                <span className="text-[11.5px] text-muted">{formatTime(flow.updatedAt)}</span>
-              </div>
-
-              <div className="mt-3 flex gap-2">
-                <Button size="sm" variant="default" onClick={() => navigate(`/flows/${flow.id}/canvas`)}>
-                  <Workflow className="size-3.5" />
-                  画布编排
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => openEdit(flow)}>
-                  <Pencil className="size-3.5" />
-                  编辑
-                </Button>
-                <Button size="sm" variant="destructive" onClick={() => handleDelete(flow)}>
-                  <Trash2 className="size-3.5" />
-                  删除
-                </Button>
-              </div>
-            </article>
+              }
+              actions={
+                <>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={() => navigate(`/flows/${flow.id}/canvas`)}
+                  >
+                    <Workflow className="size-3.5" />
+                    画布编排
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => openEdit(flow)}>
+                    <Pencil className="size-3.5" />
+                    编辑
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => handleDelete(flow)}>
+                    <Trash2 className="size-3.5" />
+                    删除
+                  </Button>
+                </>
+              }
+            >
+              <p className="line-clamp-2">{flow.description || "暂无说明。"}</p>
+              <div className="font-mono">{flow.recordCount} 条操作记录</div>
+              <div>{formatTime(flow.updatedAt)}</div>
+            </ItemCard>
           ))}
         </section>
       )}

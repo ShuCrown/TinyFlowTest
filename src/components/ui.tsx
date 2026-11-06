@@ -25,32 +25,31 @@ export function PageHeader({
   );
 }
 
-export function StatCard({
-  label,
-  value,
-  hint,
-  tone = "neutral",
+export function ItemCard({
+  code,
+  title,
+  badge,
+  children,
+  actions,
 }: {
-  label: string;
-  value: ReactNode;
-  hint?: ReactNode;
-  tone?: "neutral" | "accent" | "moss" | "amber";
+  code?: string;
+  title: ReactNode;
+  badge?: ReactNode;
+  children: ReactNode;
+  actions: ReactNode;
 }) {
-  const dot: Record<string, string> = {
-    neutral: "bg-muted/50",
-    accent: "bg-accent",
-    moss: "bg-moss",
-    amber: "bg-amber",
-  };
   return (
-    <div className="tf-panel px-4 py-3.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">{label}</span>
-        <span className={`h-1.5 w-1.5 rounded-full ${dot[tone]}`} />
+    <article className="tf-panel flex h-full flex-col p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          {code ? <span className="tf-kicker">{code}</span> : null}
+          <h2 className="mt-1 truncate text-[14px] font-semibold tracking-tight">{title}</h2>
+        </div>
+        {badge}
       </div>
-      <div className="mt-1 text-[22px] font-semibold leading-tight tracking-tight">{value}</div>
-      {hint ? <div className="mt-1 text-[11.5px] leading-4 text-muted">{hint}</div> : null}
-    </div>
+      <div className="mt-2 flex-1 space-y-1 text-[11.5px] leading-5 text-muted">{children}</div>
+      <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line pt-3">{actions}</div>
+    </article>
   );
 }
 
