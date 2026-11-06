@@ -11,10 +11,22 @@ import {
   Save,
   SlidersHorizontal,
   Square,
+  Trash2,
   TriangleAlert,
   Video,
+  X,
 } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -147,6 +159,22 @@ function nodeLabel(node: FlowNode): string {
   return node.name ?? node.id;
 }
 
+function convertRecording(
+  record: OperationRecord,
+  systemName: string,
+  steps: ChromeRecorderStep[],
+): RecordingImportResult {
+  return importChromeRecorder({
+    recording: { title: record.name, steps },
+    system: {
+      id: record.systemId || "local",
+      name: systemName,
+      baseUrl: window.location.origin,
+    },
+    flowName: record.name,
+  });
+}
+
 export function RecordWorkbenchPage() {
   const { recordId } = useParams<{ recordId: string }>();
   const navigate = useNavigate();
@@ -187,6 +215,21 @@ export function RecordWorkbenchPage() {
       ? "已载入上次录制，可点「开始回放」重走一遍。"
       : "生成节点后可在右侧目标系统回放校验。",
   );
+  const [deletingNode, setDeletingNode] = useState<{
+    node: FlowNode;
+    indices: number[];
+  } | null>(null);
+
+  // 已保存的旧记录没有 sources，按当前步骤现场转换一份用于删除映射。
+  const nodeSources = useMemo<Record<string, number[]> | null>(() => {
+    if (result?.sources) return result.sources;
+    if (!record || recording || steps.length === 0) return null;
+    try {
+      return convertRecording(record, systemName, steps).sources ?? null;
+    } catch {
+      return null;
+    }
+  }, [result, record, recording, steps, systemName]);
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const recorderRef = useRef<DomRecorder | null>(null);
@@ -298,29 +341,58 @@ export function RecordWorkbenchPage() {
     });
   };
 
-  const convert = (captured: ChromeRecorderStep[]): void => {
+  const convert = (
+    captured: ChromeRecorderStep[],
+    note = "录制完成",
+  ): RecordingImportResult | null => {
     try {
-      const converted = importChromeRecorder({
-        recording: { title: record.name, steps: captured },
-        system: {
-          id: record.systemId || "local",
-          name: systemName,
-          baseUrl: window.location.origin,
-        },
-        flowName: record.name,
-      });
+      const converted = convertRecording(record, systemName, captured);
       setResult(converted);
       setPhase("finished");
-      setStatusText(
-        `录制完成 · ${captured.length} 步 → ${converted.dsl.nodes.length} 个节点`,
-      );
+      setStatusText(`${note} · ${captured.length} 步 → ${converted.dsl.nodes.length} 个节点`);
       setRunItems([]);
       setReplayText("节点已生成，可点「开始回放」校验录制结果。");
+      return converted;
     } catch (error) {
       setResult(null);
       setPhase("failed");
       setStatusText(`转换失败：${error instanceof Error ? error.message : String(error)}`);
+      return null;
     }
+  };
+
+  const requestRemoveNode = (node: FlowNode): void => {
+    if (recording || busy || replaying) return;
+    const indices = nodeSources?.[node.id] ?? [];
+    if (indices.length === 0) {
+      setStatusText("这个节点没有对应的录制事件，无法按组件删除；请重新录制后再试。");
+      return;
+    }
+    setDeletingNode({ node, indices });
+  };
+
+  const confirmRemoveNode = (): void => {
+    if (!deletingNode) return;
+    const { node, indices } = deletingNode;
+    setDeletingNode(null);
+    const drop = new Set(indices);
+    const next = steps.filter((_, index) => !drop.has(index));
+    const hadTuning = Object.keys(overrides).length > 0;
+    setOverrides({});
+    setSteps(next);
+    setRunItems([]);
+    if (next.length === 0) {
+      setResult(null);
+      setPhase("empty");
+      setStatusText(`已删除节点「${nodeLabel(node)}」，录制事件已清空。`);
+      setReplayText("生成节点后可在右侧目标系统回放校验。");
+      return;
+    }
+    const converted = convert(
+      next,
+      `已删除节点「${nodeLabel(node)}」${hadTuning ? "（微调值已重置）" : ""}`,
+    );
+    if (!converted) setPhase("empty");
   };
 
   const stopRecording = (): void => {
@@ -930,20 +1002,40 @@ export function RecordWorkbenchPage() {
 
                   <div className="overflow-hidden rounded-lg border border-line bg-white">
                     <div className="max-h-[220px] divide-y divide-line overflow-y-auto">
-                      {result.dsl.nodes.map((node, index) => (
-                        <div key={node.id} className="flex items-center gap-2 px-2.5 py-1.5">
-                          <span className="font-mono text-[9.5px] text-muted">
-                            {String(index + 1).padStart(2, "0")}
-                          </span>
-                          <Badge variant="outline" className="shrink-0">
-                            {NODE_TYPE_LABEL[node.type]}
-                          </Badge>
-                          <span className="min-w-0 truncate text-[11.5px]">{nodeLabel(node)}</span>
-                          {node.meta?.needsConfirm ? (
-                            <TriangleAlert className="ml-auto size-3 shrink-0 text-amber" />
-                          ) : null}
-                        </div>
-                      ))}
+                      {result.dsl.nodes.map((node, index) => {
+                        const sourceCount = nodeSources?.[node.id]?.length ?? 0;
+                        const canDelete = sourceCount > 0 && !recording && !busy && !replaying;
+                        return (
+                          <div key={node.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                            <span className="font-mono text-[9.5px] text-muted">
+                              {String(index + 1).padStart(2, "0")}
+                            </span>
+                            <Badge variant="outline" className="shrink-0">
+                              {NODE_TYPE_LABEL[node.type]}
+                            </Badge>
+                            <span className="min-w-0 flex-1 truncate text-[11.5px]">
+                              {nodeLabel(node)}
+                            </span>
+                            {node.meta?.needsConfirm ? (
+                              <TriangleAlert className="size-3 shrink-0 text-amber" />
+                            ) : null}
+                            <button
+                              type="button"
+                              className="grid size-6 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-[#fdf3f0] hover:text-danger disabled:pointer-events-none disabled:opacity-35"
+                              title={
+                                canDelete
+                                  ? `删除节点（连带 ${sourceCount} 条录制事件）`
+                                  : "没有对应的录制事件，无法删除"
+                              }
+                              aria-label={`删除节点 ${nodeLabel(node)}`}
+                              disabled={!canDelete}
+                              onClick={() => requestRemoveNode(node)}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1073,6 +1165,34 @@ export function RecordWorkbenchPage() {
           onApply={applyTuning}
         />
       ) : null}
+
+      <AlertDialog
+        open={Boolean(deletingNode)}
+        onOpenChange={(open) => {
+          if (!open) setDeletingNode(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除这个节点？</AlertDialogTitle>
+            <AlertDialogDescription>
+              「{deletingNode ? nodeLabel(deletingNode.node) : ""}」会连同它对应的{" "}
+              {deletingNode?.indices.length ?? 0} 条录制事件一起删除，剩余步骤会重新生成节点；
+              已调整的微调值会重置，保存记录后生效。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              <X />
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRemoveNode}>
+              <Trash2 />
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

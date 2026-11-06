@@ -119,6 +119,8 @@ export interface RecordingImportInput {
 export interface RecordingImportResult {
   dsl: FlowDsl;
   report: RecordingImportReport;
+  /** 生成节点 id → 对应的原始步骤下标；删除节点时按它整组剔除录制事件。 */
+  sources?: Record<string, number[]>;
 }
 
 interface SelectorTokens {
@@ -180,7 +182,9 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
   const warnings: string[] = [];
   const skipped = new Map<string, number>();
   const counters: Record<string, number> = {};
+  const sources: Record<string, number[]> = {};
   let lastNavigate = "";
+  let lastNavigateNodeId = "";
   let lastTarget: ReturnType<typeof fingerprintToTarget> | undefined;
   let typedRecently = false;
 
@@ -206,6 +210,7 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
       continue;
     }
     pickerNodes.set(segment.trigger.index, node);
+    sources[node.id] = [...segment.indices];
     for (const index of segment.indices) {
       if (index !== segment.trigger.index) folded.add(index);
     }
@@ -237,7 +242,10 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
         return;
       }
       const url = toFlowUrl(raw, system, position, warn);
-      if (url === lastNavigate) return;
+      if (url === lastNavigate) {
+        if (lastNavigateNodeId) sources[lastNavigateNodeId]!.push(index);
+        return;
+      }
       lastNavigate = url;
       const id = nextId("navigate");
       nodes.push({
@@ -250,6 +258,8 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
         readySignal: "page-ready",
         meta: { sourceText: `navigate ${raw}`, needsConfirm: false },
       });
+      sources[id] = [index];
+      lastNavigateNodeId = id;
       lastTarget = undefined;
       typedRecently = false;
       return;
@@ -284,8 +294,9 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
       if (read === "attribute" && !attribute) {
         warn(`第 ${position} 步取值选择属性读取但缺少属性名，需要补充`);
       }
+      const id = nextId("extract");
       nodes.push({
-        id: nextId("extract"),
+        id,
         type: "extract",
         name: `取值 ${target.label ?? varName}`,
         system: system.id,
@@ -301,6 +312,7 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
           sampleValue: step.value === undefined ? undefined : String(step.value),
         },
       });
+      sources[id] = [index];
       lastTarget = target;
       typedRecently = false;
       return;
@@ -350,6 +362,7 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
               },
             }),
       });
+      sources[id] = [index];
       if (type === "doubleClick") {
         warn(`第 ${position} 步是 doubleClick，DSL 无双击动作，已降级为 click，需要确认`);
       }
@@ -401,6 +414,7 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
           ...(step.requests?.length ? { requests: step.requests } : {}),
         },
       });
+      sources[id] = [index];
       if (step.value === undefined) {
         warn(`第 ${position} 步 change 没有录制值，已留空，需要补充取值绑定`);
       }
@@ -437,6 +451,7 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
         target,
         meta: { sourceText: type, needsConfirm: false },
       });
+      sources[id] = [index];
       lastTarget = target;
       typedRecently = false;
       return;
@@ -463,6 +478,7 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
           key,
           meta: { sourceText: `keydown ${key}`, needsConfirm: lastTarget === undefined },
         });
+        sources[id] = [index];
         lastTarget = target;
         return;
       }
@@ -496,6 +512,7 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
         },
         meta: { sourceText: "waitForElement", needsConfirm: false },
       });
+      sources[id] = [index];
       return;
     }
 
@@ -541,6 +558,7 @@ export function importChromeRecorder(input: RecordingImportInput): RecordingImpo
       })),
       warnings,
     },
+    sources,
   };
 }
 
