@@ -1,6 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Badge, Button, Dialog, EmptyState, Field, PageHeader, StatCard } from "../components/ui";
+import { Pencil, Plus, Save, Trash2, Workflow, X } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, EmptyState, Field, PageHeader, StatCard } from "../components/ui";
 import { deleteFlow, formatTime, listFlows, newId, saveFlow } from "../lib/store";
 import type { FlowItem } from "../lib/types";
 
@@ -44,8 +48,12 @@ function FlowDialog({
       onClose={onClose}
       footer={
         <>
-          <Button onClick={onClose}>取消</Button>
-          <Button variant="primary" type="submit" form="flow-form">
+          <Button variant="outline" onClick={onClose}>
+            <X />
+            取消
+          </Button>
+          <Button variant="default" type="submit" form="flow-form">
+            <Save />
             保存流程
           </Button>
         </>
@@ -133,7 +141,8 @@ export function FlowsPage() {
         title="流程"
         description="流程把多条操作记录串成顺序执行链；画布里的取值节点负责把前一步保存的主键 code 变成环境变量，再注入下一步的筛选与选择。"
         actions={
-          <Button variant="primary" onClick={openCreate}>
+          <Button variant="default" onClick={openCreate}>
+            <Plus />
             新建流程
           </Button>
         }
@@ -153,7 +162,8 @@ export function FlowsPage() {
             title="还没有流程"
             description="先建立流程，再把新建 / 编辑类的操作记录按顺序放进来。编号扣子会把上一步产出的业务编号，带到下一步的字段赋值或筛选。"
             action={
-              <Button variant="primary" onClick={openCreate}>
+              <Button variant="default" onClick={openCreate}>
+                <Plus />
                 新建第一条流程
               </Button>
             }
@@ -192,7 +202,7 @@ export function FlowsPage() {
                     {flow.name}
                   </h2>
                 </div>
-                <Badge tone={flow.status === "ready" ? "moss" : "amber"}>
+                <Badge variant={flow.status === "ready" ? "moss" : "amber"}>
                   {flow.status === "ready" ? "可运行" : "草稿"}
                 </Badge>
               </div>
@@ -209,13 +219,16 @@ export function FlowsPage() {
               </div>
 
               <div className="mt-3 flex gap-2">
-                <Button size="sm" variant="primary" onClick={() => navigate(`/flows/${flow.id}/canvas`)}>
+                <Button size="sm" variant="default" onClick={() => navigate(`/flows/${flow.id}/canvas`)}>
+                  <Workflow className="size-3.5" />
                   画布编排
                 </Button>
-                <Button size="sm" onClick={() => openEdit(flow)}>
+                <Button size="sm" variant="outline" onClick={() => openEdit(flow)}>
+                  <Pencil className="size-3.5" />
                   编辑
                 </Button>
-                <Button size="sm" variant="danger" onClick={() => handleDelete(flow)}>
+                <Button size="sm" variant="destructive" onClick={() => handleDelete(flow)}>
+                  <Trash2 className="size-3.5" />
                   删除
                 </Button>
               </div>

@@ -1,14 +1,4 @@
-import { useEffect, useId, type ButtonHTMLAttributes, type ReactNode } from "react";
-
-type BadgeTone = "neutral" | "accent" | "moss" | "amber" | "muted";
-
-const BADGE_CLASS: Record<BadgeTone, string> = {
-  neutral: "tf-badge",
-  accent: "tf-badge tf-badge-accent",
-  moss: "tf-badge tf-badge-moss",
-  amber: "tf-badge tf-badge-amber",
-  muted: "tf-badge tf-badge-muted",
-};
+import { useEffect, useId, type ReactNode } from "react";
 
 export function PageHeader({
   code,
@@ -33,25 +23,6 @@ export function PageHeader({
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </header>
   );
-}
-
-export function Button({
-  variant = "ghost",
-  size = "md",
-  className = "",
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "ghost" | "danger";
-  size?: "md" | "sm";
-}) {
-  const classes = ["tf-btn", `tf-btn-${variant}`, size === "sm" ? "tf-btn-sm" : "", className]
-    .filter(Boolean)
-    .join(" ");
-  return <button type="button" className={classes} {...props} />;
-}
-
-export function Badge({ tone = "neutral", children }: { tone?: BadgeTone; children: ReactNode }) {
-  return <span className={BADGE_CLASS[tone]}>{children}</span>;
 }
 
 export function StatCard({

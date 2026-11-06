@@ -1,5 +1,18 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Badge, Button, Dialog, EmptyState, Field, PageHeader, StatCard } from "../components/ui";
+import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, EmptyState, Field, PageHeader, StatCard } from "../components/ui";
 import {
   deleteSystem,
   formatTime,
@@ -72,8 +85,12 @@ function SystemDialog({
       onClose={onClose}
       footer={
         <>
-          <Button onClick={onClose}>取消</Button>
-          <Button variant="primary" type="submit" form="system-form">
+          <Button variant="outline" onClick={onClose}>
+            <X />
+            取消
+          </Button>
+          <Button variant="default" type="submit" form="system-form">
+            <Save />
             保存系统
           </Button>
         </>
@@ -215,7 +232,8 @@ export function SystemsPage() {
         title="系统管理"
         description="维护被测系统的名称、目标地址与登录 Token。Token 仅保存在当前标签页的 sessionStorage，关闭标签页即清除；系统元数据仍按 localStorage 保存。"
         actions={
-          <Button variant="primary" onClick={openCreate}>
+          <Button variant="default" onClick={openCreate}>
+            <Plus />
             新增系统
           </Button>
         }
@@ -235,85 +253,90 @@ export function SystemsPage() {
             title="还没有系统"
             description="先登记一个目标系统，后续新增操作记录时就能直接选择它。"
             action={
-              <Button variant="primary" onClick={openCreate}>
+              <Button variant="default" onClick={openCreate}>
+                <Plus />
                 新增第一个系统
               </Button>
             }
           />
         </div>
       ) : (
-        <section className="tf-panel mt-5 overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
+        <Card className="mt-5 gap-0 overflow-hidden">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-3">
             <div className="flex items-center gap-2">
-              <h2 className="text-[13.5px] font-semibold">系统清单</h2>
-              <Badge tone="muted">{systems.length}</Badge>
-              <Badge tone={tokenCount ? "moss" : "muted"}>
+              <CardTitle>系统清单</CardTitle>
+              <Badge variant="secondary">{systems.length}</Badge>
+              <Badge variant={tokenCount ? "moss" : "secondary"}>
                 Token {tokenCount}/{systems.length}
               </Badge>
             </div>
             <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
               meta · localStorage / token · sessionStorage
             </span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="tf-table">
-              <thead>
-                <tr>
-                  <th>系统</th>
-                  <th>目标地址</th>
-                  <th>状态</th>
-                  <th>Token</th>
-                  <th>关联记录</th>
-                  <th>更新时间</th>
-                  <th className="w-[1%] whitespace-nowrap">操作</th>
-                </tr>
-              </thead>
-              <tbody>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>系统</TableHead>
+                  <TableHead>目标地址</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>Token</TableHead>
+                  <TableHead>关联记录</TableHead>
+                  <TableHead>更新时间</TableHead>
+                  <TableHead className="w-[1%] whitespace-nowrap text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {systems.map((system) => (
-                  <tr key={system.id}>
-                    <td>
+                  <TableRow key={system.id}>
+                    <TableCell>
                       <div className="font-semibold">{system.name}</div>
                       {system.description ? (
                         <div className="mt-0.5 line-clamp-1 text-[11.5px] text-muted">
                           {system.description}
                         </div>
                       ) : null}
-                    </td>
-                    <td className="max-w-[320px]">
+                    </TableCell>
+                    <TableCell className="max-w-[320px]">
                       <div className="truncate font-mono text-[11.5px] text-muted" title={system.baseUrl}>
                         {system.baseUrl}
                       </div>
-                    </td>
-                    <td>
-                      <Badge tone={system.enabled ? "moss" : "muted"}>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={system.enabled ? "moss" : "secondary"}>
                         {system.enabled ? "启用" : "停用"}
                       </Badge>
-                    </td>
-                    <td>
-                      <Badge tone={sessionTokens.get(system.id) ? "moss" : "muted"}>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={sessionTokens.get(system.id) ? "moss" : "secondary"}>
                         {sessionTokens.get(system.id) ? "本会话" : "未配置"}
                       </Badge>
-                    </td>
-                    <td className="font-mono text-[12px]">{recordCounts.get(system.id) ?? 0}</td>
-                    <td className="whitespace-nowrap text-[12px] text-muted">
+                    </TableCell>
+                    <TableCell className="font-mono text-[12px]">
+                      {recordCounts.get(system.id) ?? 0}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-[12px] text-muted">
                       {formatTime(system.updatedAt)}
-                    </td>
-                    <td>
-                      <div className="flex gap-1.5">
-                        <Button size="sm" onClick={() => openEdit(system)}>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-1.5">
+                        <Button size="sm" variant="outline" onClick={() => openEdit(system)}>
+                          <Pencil className="size-3.5" />
                           编辑
                         </Button>
-                        <Button size="sm" variant="danger" onClick={() => handleDelete(system)}>
+                        <Button size="sm" variant="destructive" onClick={() => handleDelete(system)}>
+                          <Trash2 className="size-3.5" />
                           删除
                         </Button>
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
 
       {dialogOpen ? (

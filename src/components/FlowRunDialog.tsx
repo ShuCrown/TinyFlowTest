@@ -9,6 +9,7 @@ import {
   SkipForward,
   SlidersHorizontal,
   TriangleAlert,
+  X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -836,6 +837,7 @@ export function FlowRunDialog({
           </span>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={onClose}>
+              <X />
               关闭
             </Button>
             {active ? (
@@ -1053,14 +1055,15 @@ function InteractTuningRows({
       </TableCell>
       <TableCell className="px-1 py-1.5">
         <Button
-          size="icon-sm"
+          size="sm"
           variant="ghost"
           title="恢复录制值"
           aria-label="恢复录制值"
           disabled={disabled}
           onClick={() => onChange(microId, "")}
         >
-          <RotateCcw />
+          <RotateCcw className="size-3.5" />
+          恢复
         </Button>
       </TableCell>
     </TableRow>
@@ -1281,14 +1284,15 @@ function PickerTuningRows({
           <TableCell className="px-2 py-1.5">{row.control}</TableCell>
           <TableCell className="px-1 py-1.5">
             <Button
-              size="icon-sm"
+              size="sm"
               variant="ghost"
               title="恢复录制值"
               aria-label="恢复录制值"
               disabled={disabled || row.key === "first"}
               onClick={row.reset}
             >
-              <RotateCcw />
+              <RotateCcw className="size-3.5" />
+              恢复
             </Button>
           </TableCell>
         </TableRow>

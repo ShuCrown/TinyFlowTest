@@ -8,8 +8,10 @@ import {
   Mic,
   Pencil,
   Plus,
+  Save,
   Trash2,
   TriangleAlert,
+  X,
 } from "lucide-react";
 
 import {
@@ -217,9 +219,11 @@ function RecordDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
+            <X />
             取消
           </Button>
           <Button type="submit" form="record-form">
+            <Save />
             保存记录
           </Button>
         </DialogFooter>
@@ -433,7 +437,7 @@ export function RecordsPage() {
                   <TableHead>节点</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>更新时间</TableHead>
-                  <TableHead className="w-[1%] text-right">操作</TableHead>
+                  <TableHead className="w-[1%] whitespace-nowrap text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -477,24 +481,17 @@ export function RecordsPage() {
                           <Mic className="size-3.5" />
                           录制
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`编辑 ${record.name}`}
-                          title="编辑"
-                          onClick={() => openEdit(record)}
-                        >
-                          <Pencil />
+                        <Button size="sm" variant="outline" onClick={() => openEdit(record)}>
+                          <Pencil className="size-3.5" />
+                          编辑
                         </Button>
                         <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          className="text-danger hover:bg-[#fdf3f0] hover:text-danger"
-                          aria-label={`删除 ${record.name}`}
-                          title="删除"
+                          size="sm"
+                          variant="destructive"
                           onClick={() => setDeleting(record)}
                         >
-                          <Trash2 />
+                          <Trash2 className="size-3.5" />
+                          删除
                         </Button>
                       </div>
                     </TableCell>
@@ -533,8 +530,14 @@ export function RecordsPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete}>删除</AlertDialogAction>
+            <AlertDialogCancel>
+              <X />
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>
+              <Trash2 />
+              删除
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { RotateCcw, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import {
+  Check,
+  FileText,
+  ListOrdered,
+  RotateCcw,
+  SlidersHorizontal,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -366,7 +374,7 @@ function NodeTuningDialog({
                         </TableCell>
                         <TableCell>
                           <Button
-                            size="icon-sm"
+                            size="sm"
                             variant="ghost"
                             title="恢复录制值"
                             aria-label="恢复录制值"
@@ -380,7 +388,8 @@ function NodeTuningDialog({
                               }));
                             }}
                           >
-                            <RotateCcw />
+                            <RotateCcw className="size-3.5" />
+                            恢复
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -431,9 +440,13 @@ function NodeTuningDialog({
           </Button>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
+              <X />
               取消
             </Button>
-            <Button onClick={apply}>应用</Button>
+            <Button onClick={apply}>
+              <Check />
+              应用
+            </Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -490,6 +503,7 @@ function PickerRows({
               aria-pressed={!indexMode}
               onClick={() => patchPicker(node.id, (current) => ({ ...current, mode: "text" }))}
             >
+              <FileText className="size-3.5" />
               按文本
             </Button>
             <Button
@@ -500,6 +514,7 @@ function PickerRows({
               title={usableIndex ? undefined : "该节点没有记录选项位置，无法按位置选择"}
               onClick={() => patchPicker(node.id, (current) => ({ ...current, mode: "index" }))}
             >
+              <ListOrdered className="size-3.5" />
               按位置
             </Button>
             {indexMode ? (
@@ -537,7 +552,7 @@ function PickerRows({
             </TableCell>
             <TableCell>
               <Button
-                size="icon-sm"
+                size="sm"
                 variant="ghost"
                 title="恢复录制值"
                 aria-label="恢复筛选值"
@@ -550,7 +565,8 @@ function PickerRows({
                   }))
                 }
               >
-                <RotateCcw />
+                <RotateCcw className="size-3.5" />
+                恢复
               </Button>
             </TableCell>
           </TableRow>
@@ -594,7 +610,7 @@ function PickerRows({
               </TableCell>
               <TableCell>
                 <Button
-                  size="icon-sm"
+                  size="sm"
                   variant="ghost"
                   title="恢复录制位置"
                   aria-label="恢复录制位置"
@@ -607,7 +623,8 @@ function PickerRows({
                     }))
                   }
                 >
-                  <RotateCcw />
+                  <RotateCcw className="size-3.5" />
+                  恢复
                 </Button>
               </TableCell>
             </TableRow>
@@ -641,7 +658,7 @@ function PickerRows({
             </TableCell>
             <TableCell>
               <Button
-                size="icon-sm"
+                size="sm"
                 variant="ghost"
                 title="恢复录制值"
                 aria-label="恢复选项值"
@@ -654,7 +671,8 @@ function PickerRows({
                   }))
                 }
               >
-                <RotateCcw />
+                <RotateCcw className="size-3.5" />
+                恢复
               </Button>
             </TableCell>
           </TableRow>

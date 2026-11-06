@@ -272,6 +272,7 @@ export function RecordWorkbenchPage() {
         <h1 className="text-[16px] font-semibold">记录不存在</h1>
         <p className="mt-1 text-[12.5px] text-muted">可能已被删除，返回记录列表重新选择。</p>
         <Button className="mt-5" onClick={() => navigate("/records")}>
+          <ArrowLeft />
           返回记录列表
         </Button>
       </Card>
@@ -638,14 +639,9 @@ export function RecordWorkbenchPage() {
     <div className="flex flex-col pb-10 xl:h-[calc(100vh-48px)] xl:overflow-hidden xl:pb-0">
       <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
         <div className="flex min-w-0 items-start gap-3">
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="返回记录列表"
-            title="返回记录列表"
-            onClick={() => navigate("/records")}
-          >
+          <Button variant="outline" onClick={() => navigate("/records")}>
             <ArrowLeft />
+            返回记录列表
           </Button>
           <div className="min-w-0">
             <span className="tf-kicker">REC / WORKBENCH</span>

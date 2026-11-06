@@ -20,9 +20,12 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   ArrowLeft,
+  Ban,
   Crosshair,
-  Plus,
+  Mic,
   Play,
+  Plus,
+  Power,
   Save,
   Trash2,
   TriangleAlert,
@@ -309,6 +312,7 @@ export function FlowCanvasPage() {
         <h1 className="text-[16px] font-semibold">流程不存在</h1>
         <p className="mt-1 text-[12.5px] text-muted">可能已被删除，返回流程列表重新选择。</p>
         <Button className="mt-5" onClick={() => navigate("/flows")}>
+          <ArrowLeft />
           返回流程列表
         </Button>
       </div>
@@ -447,14 +451,9 @@ export function FlowCanvasPage() {
     <div className="flex flex-col pb-4 xl:h-[calc(100vh-32px)] xl:overflow-hidden xl:pb-0">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
         <div className="flex min-w-0 items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="返回流程列表"
-            title="返回流程列表"
-            onClick={() => navigate("/flows")}
-          >
+          <Button variant="outline" onClick={() => navigate("/flows")}>
             <ArrowLeft />
+            返回流程列表
           </Button>
           <div className="min-w-0">
             <span className="tf-kicker">FLW / CANVAS</span>
@@ -858,10 +857,12 @@ function RecordInspector({
       <p className="mt-2 break-all font-mono text-[10px] text-muted">{record.targetUrl}</p>
       <div className="mt-2 flex gap-2">
         <Button size="sm" variant="outline" onClick={() => onPatch({ enabled: node.enabled === false })}>
+          {node.enabled === false ? <Power /> : <Ban />}
           {node.enabled === false ? "启用记录" : "禁用记录"}
         </Button>
         <Link to={`/records/${record.id}/record`}>
           <Button size="sm" variant="ghost">
+            <Mic />
             打开录制
           </Button>
         </Link>
@@ -1245,6 +1246,7 @@ function ExtractInspector({
           variant="outline"
           onClick={() => onPatch({ enabled: node.enabled === false })}
         >
+          {node.enabled === false ? <Power /> : <Ban />}
           {node.enabled === false ? "启用节点" : "禁用节点"}
         </Button>
       </div>
@@ -1472,6 +1474,7 @@ function VarPanel({ graph, onChange }: { graph: FlowGraph; onChange: (next: Flow
                   }
                 >
                   <Trash2 className="size-3.5" />
+                  删除
                 </Button>
               </div>
               <Input

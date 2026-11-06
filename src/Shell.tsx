@@ -6,14 +6,11 @@ const NAV = [
   { to: "/flows", label: "流程", code: "FLW" },
 ];
 
-const WORKBENCH_PATH = /^\/records\/[^/]+\/record\/?$/;
 const CANVAS_PATH = /^\/flows\/[^/]+\/canvas\/?$/;
 
 export function Shell() {
   const { pathname } = useLocation();
-  const isWorkbench = WORKBENCH_PATH.test(pathname);
   const isCanvas = CANVAS_PATH.test(pathname);
-  const fullWidth = isWorkbench || isCanvas;
 
   return (
     <div className="flex min-h-screen">
@@ -60,7 +57,7 @@ export function Shell() {
       <main
         className={`min-w-0 flex-1 ${isCanvas ? "px-3 py-3 lg:px-4 lg:py-4" : "px-4 py-6 md:px-8 lg:px-10"}`}
       >
-        <div className={`w-full ${fullWidth ? "" : "mx-auto max-w-[1180px]"}`}>
+        <div className="w-full">
           <Outlet />
         </div>
       </main>
