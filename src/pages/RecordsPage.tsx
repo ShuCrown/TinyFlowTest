@@ -274,16 +274,7 @@ export function RecordsPage() {
       <PageHeader
         code="REC / RECORDS"
         title="操作记录"
-        description={
-          <>
-            一次录制 = 一条记录：打开目标系统，在目标页完成表单填写、下拉选择等操作，停止后自动生成节点并保存。
-            系统地址请在
-            <Link className="ml-1 text-accent underline underline-offset-2" to="/systems">
-              系统管理
-            </Link>
-            维护。
-          </>
-        }
+        description="一次录制 = 一条记录：打开目标系统，在目标页完成表单填写、下拉选择等操作，停止后自动生成节点并保存。"
         actions={
           <Button size="sm" onClick={openCreate}>
             <Plus />
