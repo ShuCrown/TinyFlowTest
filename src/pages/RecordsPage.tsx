@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Mic, Pencil, Plus, Save, Trash2, TriangleAlert, X } from "lucide-react";
+import { MonitorDot, Pencil, Plus, Save, Trash2, TriangleAlert, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -285,7 +285,7 @@ export function RecordsPage() {
           </>
         }
         actions={
-          <Button onClick={openCreate}>
+          <Button size="sm" onClick={openCreate}>
             <Plus />
             新增记录
           </Button>
@@ -302,7 +302,7 @@ export function RecordsPage() {
             <p className="mt-1.5 max-w-[520px] text-[12.5px] leading-5 text-muted">
               先建立一条记录，随后在录制工作台里打开目标系统，捕获点击、输入、下拉与页面跳转。
             </p>
-            <Button className="mt-5" onClick={openCreate}>
+            <Button size="sm" className="mt-5" onClick={openCreate}>
               <Plus />
               新增第一条记录
             </Button>
@@ -336,7 +336,7 @@ export function RecordsPage() {
                     variant="outline"
                     onClick={() => navigate(`/records/${record.id}/record`)}
                   >
-                    <Mic className="size-3.5" />
+                    <MonitorDot className="size-3.5" />
                     录制
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => openEdit(record)}>

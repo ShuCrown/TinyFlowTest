@@ -3,7 +3,7 @@ import {
   Check,
   Crosshair,
   Loader2,
-  Mic,
+  MonitorDot,
   RefreshCw,
   TriangleAlert,
   X,
@@ -105,7 +105,6 @@ const ExtractRecorderDialog = ({
   onOpenChange: (open: boolean) => void;
   onApply: (result: ExtractRecordingApplied) => void;
 }) => {
-  const enabledSystems = systems.filter((system) => system.enabled);
   const [step, setStep] = useState<"select" | "record">("select");
   const [systemId, setSystemId] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
@@ -145,8 +144,7 @@ const ExtractRecorderDialog = ({
       if (frame) frame.src = "about:blank";
       return;
     }
-    const system =
-      enabledSystems.find((item) => item.id === initialSystemId) ?? enabledSystems[0];
+    const system = systems.find((item) => item.id === initialSystemId) ?? systems[0];
     setStep("select");
     setSystemId(system?.id ?? "");
     setTargetUrl(system?.baseUrl ?? "");
@@ -194,7 +192,7 @@ const ExtractRecorderDialog = ({
   }, [recording]);
 
   const startRecording = async (): Promise<void> => {
-    const system = enabledSystems.find((item) => item.id === systemId);
+    const system = systems.find((item) => item.id === systemId);
     if (!system) {
       setError("请选择目标系统。");
       return;
@@ -275,7 +273,7 @@ const ExtractRecorderDialog = ({
 
   const finish = (): void => {
     const recorder = recorderRef.current;
-    const system = enabledSystems.find((item) => item.id === systemId);
+    const system = systems.find((item) => item.id === systemId);
     if (!recorder || !system) {
       setError("录制尚未开始。");
       return;
@@ -319,7 +317,7 @@ const ExtractRecorderDialog = ({
       <DialogContent className="w-[min(1240px,calc(100vw-24px))] overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Mic className="size-4 text-accent" />
+            <MonitorDot className="size-4 text-accent" />
             录制取值步骤
           </DialogTitle>
           <DialogDescription>
@@ -329,9 +327,9 @@ const ExtractRecorderDialog = ({
 
         {step === "select" ? (
           <DialogBody className="grid gap-3 py-6">
-            {enabledSystems.length === 0 ? (
+            {systems.length === 0 ? (
               <p className="rounded-lg border border-amber/20 bg-amber-soft px-3 py-2 text-[12px] leading-5 text-amber">
-                还没有启用的系统，请先到「系统管理」添加目标系统。
+                还没有系统，请先到「系统管理」添加目标系统。
               </p>
             ) : (
               <>
@@ -340,7 +338,7 @@ const ExtractRecorderDialog = ({
                     value={systemId}
                     onValueChange={(nextId) => {
                       setSystemId(nextId);
-                      const system = enabledSystems.find((item) => item.id === nextId);
+                      const system = systems.find((item) => item.id === nextId);
                       setTargetUrl(system?.baseUrl ?? "");
                     }}
                   >
@@ -348,7 +346,7 @@ const ExtractRecorderDialog = ({
                       <SelectValue placeholder="选择目标系统" />
                     </SelectTrigger>
                     <SelectContent>
-                      {enabledSystems.map((system) => (
+                      {systems.map((system) => (
                         <SelectItem key={system.id} value={system.id}>
                           {system.name}
                         </SelectItem>
@@ -362,7 +360,7 @@ const ExtractRecorderDialog = ({
                     value={targetUrl}
                     spellCheck={false}
                     onChange={(event) => setTargetUrl(event.target.value)}
-                    placeholder={enabledSystems[0]?.baseUrl ?? "https://..."}
+                    placeholder={systems[0]?.baseUrl ?? "https://..."}
                   />
                 </Field>
               </>
@@ -378,8 +376,8 @@ const ExtractRecorderDialog = ({
                 <X />
                 取消
               </Button>
-              <Button onClick={begin} disabled={busy || !systemId || enabledSystems.length === 0}>
-                {busy ? <Loader2 className="animate-spin" /> : <Mic />}
+              <Button onClick={begin} disabled={busy || !systemId || systems.length === 0}>
+                {busy ? <Loader2 className="animate-spin" /> : <MonitorDot />}
                 开始录制
               </Button>
             </div>
@@ -428,7 +426,7 @@ const ExtractRecorderDialog = ({
                       <div className="pointer-events-none absolute inset-0 grid place-items-center bg-paper/75 p-6 text-center backdrop-blur-[2px]">
                         <div className="max-w-[300px]">
                           <div className="mx-auto grid size-10 place-items-center rounded-xl border border-line bg-white text-accent">
-                            <Mic className="size-4" />
+                            <MonitorDot className="size-4" />
                           </div>
                           <p className="mt-2 text-[12px] leading-5 text-muted">
                             点「开始录制」加载目标页。遇到登录页时先在窗口内完成登录，再重新开始。

@@ -137,7 +137,7 @@ export function FlowsPage() {
         title="流程"
         description="流程把多条操作记录串成顺序执行链；画布里的取值节点负责把前一步保存的主键 code 变成环境变量，再注入下一步的筛选与选择。"
         actions={
-          <Button variant="default" onClick={openCreate}>
+          <Button size="sm" variant="default" onClick={openCreate}>
             <Plus />
             新建流程
           </Button>
@@ -151,7 +151,7 @@ export function FlowsPage() {
             title="还没有流程"
             description="先建立流程，再把新建 / 编辑类的操作记录按顺序放进来。编号扣子会把上一步产出的业务编号，带到下一步的字段赋值或筛选。"
             action={
-              <Button variant="default" onClick={openCreate}>
+              <Button size="sm" variant="default" onClick={openCreate}>
                 <Plus />
                 新建第一条流程
               </Button>

@@ -5,7 +5,7 @@ import {
   CheckCircle2,
   Crosshair,
   Loader2,
-  Mic,
+  MonitorDot,
   Play,
   RefreshCw,
   Save,
@@ -183,8 +183,11 @@ export function RecordWorkbenchPage() {
     [recordId],
   );
   const systems = useMemo(() => listSystems(), []);
+  const currentSystem = record?.systemId
+    ? systems.find((system) => system.id === record.systemId)
+    : undefined;
   const systemName = record?.systemId
-    ? (systems.find((system) => system.id === record.systemId)?.name ?? "系统已删除")
+    ? (currentSystem?.name ?? "系统已删除")
     : "未绑定系统";
 
   // 配置统一在「记录管理」和「系统管理」维护，工作台只读取，不再重复展示。
@@ -703,19 +706,13 @@ export function RecordWorkbenchPage() {
 
   return (
     <div className="flex flex-col pb-10 xl:h-[calc(100vh-48px)] xl:overflow-hidden xl:pb-0">
-      <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
-        <div className="flex min-w-0 items-start gap-3">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Button size="sm" variant="outline" onClick={() => navigate("/records")}>
             <ArrowLeft />
             返回记录列表
           </Button>
-          <div className="min-w-0">
-            <span className="tf-kicker">REC / WORKBENCH</span>
-            <h1 className="tf-display mt-1 truncate text-[26px] leading-tight">{record.name}</h1>
-            <p className="mt-1 truncate text-[12.5px] text-muted">
-              {systemName} · <span className="font-mono text-[11.5px]">{targetUrl || "未设置目标地址"}</span>
-            </p>
-          </div>
+          <span className="tf-kicker">REC / WORKBENCH</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={phaseBadge.variant}>{phaseBadge.label}</Badge>
@@ -749,7 +746,7 @@ export function RecordWorkbenchPage() {
               onClick={() => void startRecording()}
               disabled={busy || replaying}
             >
-              {busy ? <Loader2 className="animate-spin" /> : hasDraft ? <RefreshCw /> : <Mic />}
+              {busy ? <Loader2 className="animate-spin" /> : hasDraft ? <RefreshCw /> : <MonitorDot />}
               {busy ? "加载中…" : hasDraft ? "重新录制" : "开始录制"}
             </Button>
           )}
@@ -759,7 +756,7 @@ export function RecordWorkbenchPage() {
       {statusText ? (
         <div
           className={cn(
-            "mt-4 flex shrink-0 flex-wrap items-start gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-[12px] leading-5",
+            "mt-3 flex shrink-0 flex-wrap items-start gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-[12px] leading-5",
             PHASE_BOX[phase],
           )}
         >
@@ -773,21 +770,71 @@ export function RecordWorkbenchPage() {
         </div>
       ) : null}
 
-      <div className="mt-5 flex flex-col gap-5 xl:min-h-0 xl:flex-1 xl:flex-row xl:items-stretch">
-        <div className="grid w-full min-w-0 shrink-0 content-start gap-4 xl:min-h-0 xl:w-[380px] xl:overflow-y-auto xl:pr-1">
-          <Card className="gap-0 overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between border-b border-line pb-3">
+      <div className="mt-4 flex min-h-0 flex-col gap-3 xl:flex-1 xl:flex-row xl:items-stretch">
+        <div className="flex w-full min-w-0 shrink-0 flex-col gap-2.5 xl:min-h-0 xl:w-[380px] xl:overflow-y-auto xl:pr-1">
+          <Card className="shrink-0 gap-0 overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-line px-4 pb-2.5 pt-3">
+              <CardTitle>所属系统</CardTitle>
+              <Badge variant={currentSystem ? "moss" : "secondary"}>
+                {currentSystem
+                  ? "已绑定"
+                  : record.systemId
+                    ? "系统已删除"
+                    : "未绑定"}
+              </Badge>
+            </CardHeader>
+            <CardContent className="grid gap-1.5 px-4 pb-3 pt-2.5">
+              {currentSystem ? (
+                <>
+                  <span className="min-w-0 truncate text-[12.5px] font-medium">
+                    {currentSystem.name}
+                  </span>
+                  {currentSystem.description ? (
+                    <p className="line-clamp-2 text-[11px] leading-4 text-muted">
+                      {currentSystem.description}
+                    </p>
+                  ) : null}
+                  <p
+                    className="truncate font-mono text-[10.5px] text-muted"
+                    title={currentSystem.baseUrl}
+                  >
+                    {currentSystem.baseUrl}
+                  </p>
+                </>
+              ) : (
+                <p className="text-[11px] leading-4 text-muted">
+                  {record.systemId ? (
+                    "这条记录绑定的系统已被删除，请到「系统管理」重新维护。"
+                  ) : (
+                    <>
+                      还没有绑定系统，可先到
+                      <Link
+                        className="mx-1 text-accent underline underline-offset-2"
+                        to="/systems"
+                      >
+                        系统管理
+                      </Link>
+                      添加。
+                    </>
+                  )}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="shrink-0 gap-0 overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-line px-4 pb-2.5 pt-3">
               <CardTitle>录制事件</CardTitle>
-              <Badge variant="secondary">{steps.length}</Badge>
+              <Badge variant="secondary">{steps.length} 步</Badge>
             </CardHeader>
             <CardContent className="p-0">
               {steps.length === 0 ? (
-                <p className="px-4 py-7 text-center text-[12px] leading-5 text-muted">
+                <p className="px-4 py-5 text-center text-[11.5px] leading-4 text-muted">
                   还没有录制事件。开始录制后完成点击、输入、下拉等操作；点「录制取值」再点字段，可把值带入后续记录。
                 </p>
               ) : (
                 <>
-                  <ol className="max-h-[300px] divide-y divide-line overflow-y-auto">
+                  <ol className="max-h-[240px] divide-y divide-line overflow-y-auto">
                     {steps.map((step, index) => (
                     <li key={`${step.type ?? "step"}-${index}`} className="flex items-start gap-2.5 px-4 py-2">
                       <span className="pt-0.5 font-mono text-[10px] text-muted">
@@ -951,47 +998,49 @@ export function RecordWorkbenchPage() {
             </CardContent>
           </Card>
 
-          <Card className="gap-0 overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between border-b border-line pb-3">
+          <Card className="flex flex-col gap-0 overflow-hidden xl:min-h-[320px] xl:flex-1">
+            <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-line px-4 pb-2.5 pt-3">
               <CardTitle>转换结果</CardTitle>
-              {result ? <Badge variant="moss">{result.dsl.nodes.length} NODES</Badge> : null}
+              {result ? (
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="moss">{result.dsl.nodes.length} 节点</Badge>
+                  {overrideCount > 0 ? (
+                    <Badge variant="amber">{overrideCount} 项微调</Badge>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setTuningOpen(true)}
+                    disabled={replaying || busy}
+                  >
+                    <SlidersHorizontal />
+                    微调
+                  </Button>
+                </div>
+              ) : null}
             </CardHeader>
-            <CardContent className="grid gap-3 pt-3">
+            <CardContent className="flex flex-col gap-2.5 px-4 pb-3 pt-2.5 xl:min-h-0 xl:flex-1">
               {!result ? (
                 <p className="text-[12px] leading-5 text-muted">
                   停止录制后自动把原始步骤转换成可执行节点，并给出跳过与待确认项。
                 </p>
               ) : (
                 <>
-                  <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-muted">
-                    <Badge variant="secondary">{result.report.steps} 步</Badge>
-                    <Badge variant="moss">{result.report.nodes} 节点</Badge>
-                    {result.report.needsConfirm > 0 ? (
-                      <Badge variant="amber">{result.report.needsConfirm} 待确认</Badge>
-                    ) : null}
-                    {result.report.skipped.length > 0 ? (
-                      <span className="font-mono text-[10.5px]">
-                        跳过 {result.report.skipped.map((item) => `${item.type}×${item.count}`).join(" / ")}
-                      </span>
-                    ) : null}
-                    <div className="ml-auto flex items-center gap-1.5">
-                      {overrideCount > 0 ? (
-                        <Badge variant="amber">{overrideCount} 项微调</Badge>
+                  {result.report.needsConfirm > 0 || result.report.skipped.length > 0 ? (
+                    <div className="flex shrink-0 flex-wrap items-center gap-2 text-[11.5px] text-muted">
+                      {result.report.needsConfirm > 0 ? (
+                        <Badge variant="amber">{result.report.needsConfirm} 待确认</Badge>
                       ) : null}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setTuningOpen(true)}
-                        disabled={replaying || busy}
-                      >
-                        <SlidersHorizontal />
-                        微调
-                      </Button>
+                      {result.report.skipped.length > 0 ? (
+                        <span className="font-mono text-[10.5px]">
+                          跳过 {result.report.skipped.map((item) => `${item.type}×${item.count}`).join(" / ")}
+                        </span>
+                      ) : null}
                     </div>
-                  </div>
+                  ) : null}
 
                   {result.report.warnings.length > 0 ? (
-                    <div className="rounded-lg border border-amber/20 bg-amber-soft/60 px-2.5 py-2">
+                    <div className="shrink-0 rounded-lg border border-amber/20 bg-amber-soft/60 px-2.5 py-2">
                       <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-amber">
                         <TriangleAlert className="size-3.5 shrink-0" />
                         转换提示
@@ -1006,8 +1055,8 @@ export function RecordWorkbenchPage() {
                     </div>
                   ) : null}
 
-                  <div className="overflow-hidden rounded-lg border border-line bg-white">
-                    <div className="max-h-[220px] divide-y divide-line overflow-y-auto">
+                  <div className="overflow-hidden rounded-lg border border-line bg-white xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+                    <div className="max-h-[220px] divide-y divide-line overflow-y-auto xl:max-h-none xl:min-h-0 xl:flex-1">
                       {result.dsl.nodes.map((node, index) => {
                         const sourceCount = nodeSources?.[node.id]?.length ?? 0;
                         const canDelete = sourceCount > 0 && !recording && !busy && !replaying;
@@ -1016,7 +1065,7 @@ export function RecordWorkbenchPage() {
                             <span className="font-mono text-[9.5px] text-muted">
                               {String(index + 1).padStart(2, "0")}
                             </span>
-                            <Badge variant="outline" className="shrink-0">
+                            <Badge variant="outline" className="w-[52px] shrink-0">
                               {NODE_TYPE_LABEL[node.type]}
                             </Badge>
                             <span className="min-w-0 flex-1 truncate text-[11.5px]">
@@ -1045,7 +1094,7 @@ export function RecordWorkbenchPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-line bg-white/70 p-2.5">
+                  <div className="shrink-0 rounded-xl border border-line bg-white/70 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5 text-[11.5px] font-medium">
                         <Play className="size-3.5 text-accent" />
@@ -1102,7 +1151,7 @@ export function RecordWorkbenchPage() {
                     ) : null}
                   </div>
 
-                  <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted">
+                  <p className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] text-muted">
                     <CheckCircle2 className="size-3 text-moss" />
                     原始步骤与 DSL 会和记录一起存入 localStorage
                   </p>
@@ -1113,7 +1162,7 @@ export function RecordWorkbenchPage() {
         </div>
 
         <Card className="flex w-full min-w-0 flex-col gap-0 overflow-hidden xl:min-h-0 xl:flex-1">
-          <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-3">
+          <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-2.5">
             <div className="flex min-w-0 items-center gap-2">
               <CardTitle>目标系统</CardTitle>
               <Badge variant={replaying || recording ? "accent" : "secondary"}>{frameBadge}</Badge>

@@ -16,7 +16,7 @@ import {
 } from "../lib/store";
 import type { OperationRecord, TargetSystem } from "../lib/types";
 
-type SystemDraft = Pick<TargetSystem, "name" | "baseUrl" | "description" | "enabled"> & {
+type SystemDraft = Pick<TargetSystem, "name" | "baseUrl" | "description"> & {
   token?: string;
 };
 
@@ -43,7 +43,6 @@ function SystemDialog({
   const [token, setToken] = useState(() => (system ? getSystemToken(system.id) : ""));
   const [showToken, setShowToken] = useState(false);
   const [description, setDescription] = useState(system?.description ?? "");
-  const [enabled, setEnabled] = useState(system?.enabled ?? true);
   const [error, setError] = useState("");
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
@@ -64,7 +63,6 @@ function SystemDialog({
       baseUrl: nextUrl.replace(/\/$/, ""),
       token: token.trim() || undefined,
       description: description.trim() || undefined,
-      enabled,
     });
   };
 
@@ -141,15 +139,6 @@ function SystemDialog({
             placeholder="这个系统主要覆盖哪些业务操作？"
           />
         </Field>
-        <label className="flex items-center gap-2 text-[12.5px] text-ink">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(event) => setEnabled(event.target.checked)}
-            className="h-4 w-4 accent-[var(--color-accent)]"
-          />
-          启用该系统
-        </label>
         {error ? (
           <p className="rounded-lg border border-danger/20 bg-[#fdf3f0] px-3 py-2 text-[12px] leading-5 text-danger">
             {error}
@@ -216,7 +205,7 @@ export function SystemsPage() {
         title="系统管理"
         description="维护被测系统的名称、目标地址与登录令牌。令牌仅保存在当前标签页的会话存储，关闭标签页即清除；系统资料仍保存在本地存储。"
         actions={
-          <Button variant="default" onClick={openCreate}>
+          <Button size="sm" variant="default" onClick={openCreate}>
             <Plus />
             新增系统
           </Button>
@@ -230,7 +219,7 @@ export function SystemsPage() {
             title="还没有系统"
             description="先登记一个目标系统，后续新增操作记录时就能直接选择它。"
             action={
-              <Button variant="default" onClick={openCreate}>
+              <Button size="sm" variant="default" onClick={openCreate}>
                 <Plus />
                 新增第一个系统
               </Button>
@@ -244,11 +233,6 @@ export function SystemsPage() {
               key={system.id}
               code={`系统-${system.id.slice(-4).toUpperCase()}`}
               title={system.name}
-              badge={
-                <Badge variant={system.enabled ? "moss" : "secondary"}>
-                  {system.enabled ? "启用" : "停用"}
-                </Badge>
-              }
               actions={
                 <>
                   <Button size="sm" variant="outline" onClick={() => openEdit(system)}>

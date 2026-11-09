@@ -25,11 +25,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   ArrowLeft,
-  Ban,
-  Mic,
+  MonitorDot,
   Play,
   Plus,
-  Power,
   Save,
   Trash2,
   TriangleAlert,
@@ -66,7 +64,7 @@ import type {
   FlowRecordNode,
   OperationRecord,
 } from "@/lib/types";
-import type { ExtractNode, FlowNode } from "@/dsl/index.ts";
+import type { ExtractNode } from "@/dsl/index.ts";
 import { compileFlow, FlowCompileError } from "@/flow/compile.ts";
 import { listRecordSlots, type RecordSlot } from "@/flow/slots.ts";
 import {
@@ -75,9 +73,9 @@ import {
   hasManualExtractConfig,
   listExtractProducers,
   renameExtractVar,
-  renameManualVar,
   uniqueVarName,
 } from "@/flow/vars.ts";
+import type { ExtractProducer } from "@/flow/vars.ts";
 
 const EMPTY_GRAPH: FlowGraph = { nodes: [], edges: [], injections: [], vars: [] };
 const RECORD_COLOR = "#c14b2a";
@@ -511,15 +509,6 @@ export function FlowCanvasPage() {
     );
   }
 
-  const patchNode = (id: string, patch: Partial<FlowExtractNode> | Partial<FlowRecordNode>): void => {
-    setGraph((current) => ({
-      ...current,
-      nodes: current.nodes.map((node) =>
-        node.id === id ? ({ ...node, ...patch } as FlowCanvasNode) : node,
-      ),
-    }));
-  };
-
   const renameNodeVar = (
     key: string,
     recordedName: string,
@@ -583,25 +572,6 @@ export function FlowCanvasPage() {
     );
     setRecorderOpen(false);
     setRecordingNodeId(null);
-  };
-
-  const clearExtractRecording = (nodeId: string): void => {
-    setGraph((current) => {
-      const aliases = { ...(current.varAliases ?? {}) };
-      for (const key of Object.keys(aliases)) {
-        if (key.startsWith(`${nodeId}::manual::`)) continue;
-        if (key === nodeId || key.startsWith(`${nodeId}::`)) delete aliases[key];
-      }
-      return {
-        ...current,
-        varAliases: aliases,
-        nodes: current.nodes.map((node) =>
-          node.id === nodeId && node.kind === "extract"
-            ? { ...node, recordedDsl: undefined, preDsl: undefined }
-            : node,
-        ),
-      };
-    });
   };
 
   const addManualRow = (nodeId: string): void => {
@@ -1043,7 +1013,6 @@ export function FlowCanvasPage() {
                 record={recordMap.get(selected.recordId)}
                 graph={graph}
                 vars={availableVars}
-                onPatch={(patch) => patchNode(selected.id, patch)}
                 onDelete={() => removeNode(selected.id)}
                 onReplay={() => setReplayRecordId(selected.recordId)}
                 onSlotSource={(slot, mode, value) => setSlotSource(selected.id, slot, mode, value)}
@@ -1065,8 +1034,7 @@ export function FlowCanvasPage() {
                   setRecordingNodeId(selected.id);
                   setRecorderOpen(true);
                 }}
-                recordReady={systems.some((system) => system.enabled)}
-                onClearRecording={() => clearExtractRecording(selected.id)}
+                recordReady={systems.length > 0}
                 onAddManualRow={() => addManualRow(selected.id)}
                 onPatchManualRow={(rowId, patch) =>
                   patchManualRow(selected.id, rowId, patch)
@@ -1077,7 +1045,7 @@ export function FlowCanvasPage() {
               />
             )
           ) : (
-            <VarPanel graph={graph} recordMap={recordMap} onChange={setGraph} />
+            <VarPanel graph={graph} recordMap={recordMap} />
           )}
         </aside>
       </div>
@@ -1132,16 +1100,14 @@ function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
         style={{ width: 8, height: 8, background: "#fff", borderColor: accent }}
       />
       <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span
             className="font-mono text-[10px] font-semibold tracking-[0.16em]"
             style={{ color: accent }}
           >
             {node.kind === "record" ? "记录" : "取值"}
           </span>
-          <span className="truncate font-mono text-[9px] text-muted">
-            {node.id.slice(-8)}
-          </span>
+          <span className="min-w-0 break-all font-mono text-[9px] text-muted">{node.id}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {data.entry ? (
@@ -1162,11 +1128,11 @@ function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
         </div>
       </div>
       <div className="px-3 py-2.5">
-        <div className="truncate text-[14.5px] font-medium leading-tight text-ink">
+        <div className="break-words text-[14.5px] font-medium leading-tight text-ink">
           {data.title}
         </div>
-        <div className="mt-1 truncate font-mono text-[10.5px] text-muted">{data.summary}</div>
-        <div className="mt-2 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted/70">
+        <div className="mt-1 break-words font-mono text-[10.5px] text-muted">{data.summary}</div>
+        <div className="mt-2 break-words font-mono text-[9px] uppercase tracking-[0.12em] text-muted/70">
           {data.footer}
         </div>
       </div>
@@ -1187,7 +1153,6 @@ function RecordInspector({
   record,
   graph,
   vars,
-  onPatch,
   onDelete,
   onReplay,
   onSlotSource,
@@ -1197,7 +1162,6 @@ function RecordInspector({
   record?: OperationRecord;
   graph: FlowGraph;
   vars: string[];
-  onPatch: (patch: Partial<FlowRecordNode>) => void;
   onDelete: () => void;
   onReplay: () => void;
   onSlotSource: (slot: RecordSlot, mode: SlotsMode, value?: string) => void;
@@ -1237,10 +1201,6 @@ function RecordInspector({
         </div>
         <p className="mt-2 break-all font-mono text-[10px] text-muted">{record.targetUrl}</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => onPatch({ enabled: node.enabled === false })}>
-            {node.enabled === false ? <Power /> : <Ban />}
-            {node.enabled === false ? "启用记录" : "禁用记录"}
-          </Button>
           <Button
             size="sm"
             variant="default"
@@ -1432,41 +1392,12 @@ function SlotEditor({
   );
 }
 
-const RECORDED_STEP_LABEL: Record<FlowNode["type"], string> = {
-  navigate: "导航",
-  interact: "操作",
-  picker: "选择",
-  wait: "等待",
-  extract: "取值",
-};
-
-function recordedStepSummary(node: FlowNode): string {
-  switch (node.type) {
-    case "navigate":
-      return node.url;
-    case "interact":
-      return `${node.adapter} · ${node.target.label ?? node.name ?? node.id}`;
-    case "picker":
-      return node.trigger.label ?? node.name ?? node.id;
-    case "wait":
-      return typeof node.condition === "string" ? node.condition : node.condition.kind;
-    case "extract":
-      return (
-        (node.source === "dom" ? node.target.label : undefined) ??
-        node.name ??
-        node.varName ??
-        node.id
-      );
-  }
-}
-
 function ExtractInspector({
   node,
   graph,
   onRenameExtract,
   onRecordSteps,
   recordReady,
-  onClearRecording,
   onAddManualRow,
   onPatchManualRow,
   onRemoveManualRow,
@@ -1483,269 +1414,185 @@ function ExtractInspector({
   ) => void;
   onRecordSteps: () => void;
   recordReady: boolean;
-  onClearRecording: () => void;
   onAddManualRow: () => void;
   onPatchManualRow: (rowId: string, patch: Partial<{ value: string }>) => void;
   onRemoveManualRow: (rowId: string) => void;
   duplicateNames: ReadonlySet<string>;
   onDelete: () => void;
 }) {
-  const varName = effectiveExtractName(graph, node.id, node.varName);
-  const recorded = node.recordedDsl;
   const recordedExtracts = recordedExtractNodes(node);
   const manualRows = node.manualVars ?? [];
   const totalRows = recordedExtracts.length + manualRows.length;
-  const titleName = recordedExtracts[0]
-    ? effectiveExtractName(
-        graph,
-        `${node.id}::${recordedExtracts[0].id}`,
-        recordedExtracts[0].varName,
-      )
-    : manualRows[0]
-      ? effectiveExtractName(
-          graph,
-          `${node.id}::manual::${manualRows[0].id}`,
-          manualRows[0].varName,
-        )
-      : varName;
-  const preStepCount = node.preDsl?.nodes.length ?? 0;
-  const consumersOf = (name: string): number =>
-    graph.injections.filter(
-      (item) => item.source.kind === "var" && item.source.name === name,
-    ).length;
 
   return (
     <>
-      <InspectorCard>
-        <InspectorTitle code="取值节点" title={titleName || "取值节点"} />
+      <InspectorCard className="min-w-0">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
+            取值节点
+          </span>
+          <span className="break-all font-mono text-[9.5px] text-muted">{node.id}</span>
+        </div>
         <p className="mt-1.5 text-[11px] leading-4 text-muted">
           在弹窗里录制真实操作和取值步骤；每个取值会生成一个环境变量。
         </p>
 
-        <div className="mt-3 rounded-lg bg-paper px-2.5 py-2">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-[11.5px] font-medium">录制步骤</div>
-              <div className="mt-0.5 text-[10.5px] leading-4 text-muted">
-                {recorded
-                  ? `${recordedExtracts.length} 个录制取值、${manualRows.length} 个手动取值、${recorded.nodes.length - recordedExtracts.length} 个操作步骤。`
-                  : manualRows.length > 0
-                    ? `${manualRows.length} 个手动取值。`
-                    : preStepCount > 0
-                      ? `已录制 ${preStepCount} 个前置步骤。`
-                      : "弹窗选择系统并录制真实操作，完成后保存到当前取值节点。"}
-                {!recordReady ? "请先到「系统管理」添加并启用一个系统。" : ""}
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-              {recorded || preStepCount > 0 ? (
-                <Button size="sm" variant="ghost" onClick={onClearRecording}>
-                  清除录制
-                </Button>
-              ) : null}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onRecordSteps}
-                disabled={!recordReady}
-              >
-                <Mic />
-                {recorded || preStepCount > 0 ? "重新录制" : "录制步骤"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </InspectorCard>
-
-      {recorded ? (
-        <InspectorCard>
+        <div className="mt-3">
           <InspectorSectionHeader
-            label="录制步骤"
-            aside={<Badge variant="secondary">{recorded.nodes.length}</Badge>}
+            label="取值表格"
+            aside={
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRecordSteps}
+                  disabled={!recordReady}
+                >
+                  <MonitorDot />
+                  录制
+                </Button>
+                <Button size="sm" variant="outline" onClick={onAddManualRow}>
+                  <Plus className="size-3" />
+                  新增
+                </Button>
+              </div>
+            }
           />
-          <ol className="mt-2 grid max-h-[200px] gap-0.5 overflow-y-auto">
-            {recorded.nodes.map((item, index) => (
-              <li
-                key={item.id}
-                className={cn(
-                  "flex items-start gap-1.5 rounded px-1.5 py-1 text-[10.5px]",
-                  item.type === "extract" && "bg-moss/10",
-                )}
-              >
-                <span className="pt-0.5 font-mono text-[9px] text-muted">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">
-                    {RECORDED_STEP_LABEL[item.type] ?? item.type}
-                  </span>
-                  <span className="block truncate text-[9.5px] text-muted">
-                    {recordedStepSummary(item)}
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ol>
-        </InspectorCard>
-      ) : null}
-
-      <InspectorCard className="min-w-0">
-        <InspectorSectionHeader
-          label="取值表格"
-          aside={
-            <div className="flex items-center gap-1.5">
-              <Badge variant="moss">{totalRows}</Badge>
-              <Button size="sm" variant="ghost" onClick={onAddManualRow}>
-                <Plus className="size-3" />
-                新增
-              </Button>
-            </div>
-          }
-        />
-        <div className="mt-2 -mx-1 overflow-x-auto">
-          <table className="w-full table-fixed text-left">
-            <thead className="text-[9px] uppercase tracking-[0.1em] text-muted">
-              <tr>
-                <th className="w-5 px-1 py-1.5">#</th>
-                <th className="px-1 py-1.5">取值目标</th>
-                <th className="w-[94px] px-1 py-1.5">变量名</th>
-                <th className="w-[84px] px-1 py-1.5">值</th>
-                <th className="w-7 px-1 py-1.5 text-right">引用</th>
-                <th className="w-6 px-0 py-1.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {recordedExtracts.map((item, index) => {
-                const name = effectiveExtractName(
-                  graph,
-                  `${node.id}::${item.id}`,
-                  item.varName,
-                );
-                const duplicate = duplicateNames.has(name);
-                const value = item.meta?.sampleValue;
-                return (
-                  <tr key={item.id} className="border-t border-line">
-                    <td className="px-1 py-1.5 font-mono text-[9.5px] text-muted">
-                      {index + 1}
-                    </td>
-                    <td className="px-1 py-1.5 text-[10px] leading-4 text-muted">
-                      <span
-                        className="block truncate"
-                        title={describeExtractNode(item)}
-                      >
-                        {describeExtractNode(item)}
-                      </span>
-                    </td>
-                    <td className="px-1 py-1.5">
-                      <VarNameInput
-                        className={cn(
-                          "h-7 w-full px-2 font-mono text-[10.5px]",
-                          duplicate && "border-danger",
-                        )}
-                        value={name}
-                        placeholder="变量名"
-                        onCommit={(next) =>
-                          onRenameExtract(item.id, item.varName, name, next)
-                        }
-                      />
-                      {duplicate ? (
-                        <span className="mt-0.5 block text-[9px] text-danger">
-                          变量名重复
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-1 py-1.5">
-                      <span
-                        className="block truncate font-mono text-[10px] text-muted"
-                        title={value === undefined ? "" : String(value)}
-                      >
-                        {value === undefined || value === "" ? "—" : String(value)}
-                      </span>
-                    </td>
-                    <td className="px-1 py-1.5 text-right text-[10px] text-muted">
-                      {consumersOf(name)}
-                    </td>
-                    <td />
-                  </tr>
-                );
-              })}
-              {manualRows.map((row, index) => {
-                const name = effectiveExtractName(
-                  graph,
-                  `${node.id}::manual::${row.id}`,
-                  row.varName,
-                );
-                const duplicate = duplicateNames.has(name);
-                return (
-                  <tr key={row.id} className="border-t border-line">
-                    <td className="px-1 py-1.5 font-mono text-[9.5px] text-muted">
-                      {recordedExtracts.length + index + 1}
-                    </td>
-                    <td className="px-1 py-1.5 text-[10px] text-muted">手动值</td>
-                    <td className="px-1 py-1.5">
-                      <VarNameInput
-                        className={cn(
-                          "h-7 w-full px-2 font-mono text-[10.5px]",
-                          duplicate && "border-danger",
-                        )}
-                        value={name}
-                        placeholder="变量名"
-                        onCommit={(next) =>
-                          onRenameExtract(
-                            `manual::${row.id}`,
-                            row.varName,
-                            name,
-                            next,
-                          )
-                        }
-                      />
-                      {duplicate ? (
-                        <span className="mt-0.5 block text-[9px] text-danger">
-                          变量名重复
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-1 py-1.5">
-                      <Input
-                        className="h-7 px-2 text-[10.5px]"
-                        value={row.value}
-                        placeholder="值"
-                        spellCheck={false}
-                        onChange={(event) =>
-                          onPatchManualRow(row.id, { value: event.target.value })
-                        }
-                      />
-                    </td>
-                    <td className="px-1 py-1.5 text-right text-[10px] text-muted">
-                      {consumersOf(name)}
-                    </td>
-                    <td className="px-0 py-1.5">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="size-5 p-0 text-muted hover:text-danger"
-                        title="删除手动取值"
-                        aria-label="删除手动取值"
-                        onClick={() => onRemoveManualRow(row.id)}
-                      >
-                        <X className="size-3" />
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
-              {totalRows === 0 ? (
-                <tr className="border-t border-line">
-                  <td
-                    colSpan={6}
-                    className="px-2 py-3 text-center text-[10.5px] text-muted"
-                  >
-                    还没有取值。可以录制，也可以点「新增」手动添加。
-                  </td>
+          <div className="mt-2.5 overflow-x-auto rounded-lg border border-line">
+            <table className="w-full table-fixed text-left">
+              <thead className="whitespace-nowrap bg-paper text-[9.5px] font-medium text-muted">
+                <tr>
+                  <th className="w-9 px-1.5 py-1.5">序号</th>
+                  <th className="w-[21%] px-1.5 py-1.5">取值目标</th>
+                  <th className="w-[33%] px-1.5 py-1.5">变量名</th>
+                  <th className="w-[28%] px-1.5 py-1.5">值</th>
+                  <th className="w-7 px-0 py-1.5" />
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {recordedExtracts.map((item, index) => {
+                  const name = effectiveExtractName(
+                    graph,
+                    `${node.id}::${item.id}`,
+                    item.varName,
+                  );
+                  const duplicate = duplicateNames.has(name);
+                  const value = item.meta?.sampleValue;
+                  return (
+                    <tr key={item.id} className="border-t border-line">
+                      <td className="px-1.5 py-2 font-mono text-[9.5px] text-muted">
+                        {String(index + 1).padStart(2, "0")}
+                      </td>
+                      <td className="px-1.5 py-2 text-[10px] leading-4 text-ink/75">
+                        <span className="block truncate" title={describeExtractNode(item)}>
+                          {describeExtractNode(item)}
+                        </span>
+                      </td>
+                      <td className="px-1.5 py-2">
+                        <VarNameInput
+                          className={cn(
+                            "h-7 w-full px-2 font-mono text-[10.5px]",
+                            duplicate && "border-danger",
+                          )}
+                          value={name}
+                          placeholder="变量名"
+                          onCommit={(next) =>
+                            onRenameExtract(item.id, item.varName, name, next)
+                          }
+                        />
+                        {duplicate ? (
+                          <span className="mt-0.5 block text-[9px] text-danger">
+                            变量名重复
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-1.5 py-2">
+                        <span
+                          className="block truncate font-mono text-[10px] text-muted"
+                          title={value === undefined ? "" : String(value)}
+                        >
+                          {value === undefined || value === "" ? "—" : String(value)}
+                        </span>
+                      </td>
+                      <td />
+                    </tr>
+                  );
+                })}
+                {manualRows.map((row, index) => {
+                  const name = effectiveExtractName(
+                    graph,
+                    `${node.id}::manual::${row.id}`,
+                    row.varName,
+                  );
+                  const duplicate = duplicateNames.has(name);
+                  return (
+                    <tr key={row.id} className="border-t border-line">
+                      <td className="px-1.5 py-2 font-mono text-[9.5px] text-muted">
+                        {String(recordedExtracts.length + index + 1).padStart(2, "0")}
+                      </td>
+                      <td className="px-1.5 py-2 text-[10px] text-muted">手动值</td>
+                      <td className="px-1.5 py-2">
+                        <VarNameInput
+                          className={cn(
+                            "h-7 w-full px-2 font-mono text-[10.5px]",
+                            duplicate && "border-danger",
+                          )}
+                          value={name}
+                          placeholder="变量名"
+                          onCommit={(next) =>
+                            onRenameExtract(
+                              `manual::${row.id}`,
+                              row.varName,
+                              name,
+                              next,
+                            )
+                          }
+                        />
+                        {duplicate ? (
+                          <span className="mt-0.5 block text-[9px] text-danger">
+                            变量名重复
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-1.5 py-2">
+                        <Input
+                          className="h-7 px-2 text-[10.5px]"
+                          value={row.value}
+                          placeholder="值"
+                          spellCheck={false}
+                          onChange={(event) =>
+                            onPatchManualRow(row.id, { value: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td className="px-0 py-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="size-7 p-0 text-danger hover:bg-[#fdf3f0]"
+                          title="删除手动取值"
+                          aria-label="删除手动取值"
+                          onClick={() => onRemoveManualRow(row.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {totalRows === 0 ? (
+                  <tr className="border-t border-line">
+                    <td
+                      colSpan={5}
+                      className="px-2 py-3 text-center text-[10.5px] text-muted"
+                    >
+                      还没有取值。可以录制，也可以点「新增」手动添加。
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </div>
       </InspectorCard>
 
@@ -1759,18 +1606,56 @@ function ExtractInspector({
   );
 }
 
+function describeVarProducer(
+  graph: FlowGraph,
+  recordMap: Map<string, OperationRecord>,
+  producer: ExtractProducer,
+): { target: string; value: unknown } {
+  if (producer.source === "record") {
+    const dslNode = producer.recordNodeId
+      ? recordMap
+          .get(producer.recordNodeId)
+          ?.dsl?.nodes.find(
+            (item): item is ExtractNode =>
+              item.type === "extract" && item.id === producer.dslNodeId,
+          )
+      : undefined;
+    return {
+      target: `记录「${producer.recordName ?? "已删除"}」${
+        dslNode ? ` · ${describeExtractNode(dslNode)}` : ""
+      }`,
+      value: dslNode?.meta?.sampleValue,
+    };
+  }
+  const [nodeId, scope, rowId] = producer.key.split("::");
+  const node = graph.nodes.find(
+    (item): item is FlowExtractNode => item.kind === "extract" && item.id === nodeId,
+  );
+  if (!node) return { target: "—", value: undefined };
+  if (scope === "manual") {
+    const row = node.manualVars?.find((item) => item.id === rowId);
+    return { target: "手动值", value: row?.value };
+  }
+  if (producer.dslNodeId) {
+    const dslNode = recordedExtractNodes(node).find(
+      (item) => item.id === producer.dslNodeId,
+    );
+    return {
+      target: dslNode ? describeExtractNode(dslNode) : "—",
+      value: dslNode?.meta?.sampleValue,
+    };
+  }
+  return { target: extractSummary(node), value: undefined };
+}
+
 function VarPanel({
   graph,
   recordMap,
-  onChange,
 }: {
   graph: FlowGraph;
   recordMap: Map<string, OperationRecord>;
-  onChange: (next: FlowGraph) => void;
 }) {
   const producers = listExtractProducers(graph, recordMap);
-  const consumersOf = (name: string): number =>
-    graph.injections.filter((item) => item.source.kind === "var" && item.source.name === name).length;
   const counts = new Map<string, number>();
   for (const producer of producers) {
     if (!producer.name) continue;
@@ -1779,69 +1664,76 @@ function VarPanel({
   const duplicates = [...counts.entries()]
     .filter(([, count]) => count > 1)
     .map(([name]) => name);
+  const duplicateNames = new Set(duplicates);
 
   return (
-    <>
-      <InspectorCard>
-        <InspectorTitle code="变量" title="流程环境变量" />
-        <p className="mt-1.5 text-[11px] leading-4 text-muted">
-          画布取值和记录内取值产出的变量都在这里统一改名；改名会同步更新本流程的注入引用和
-          {" {{变量}} "}模板。也可以手工声明一个固定值。
-        </p>
+    <InspectorCard className="min-w-0">
+      <InspectorTitle code="变量" title="流程环境变量" />
+      <p className="mt-1.5 text-[11px] leading-4 text-muted">
+        画布取值和记录内取值产出的变量都在这里汇总展示；改名请回到对应的取值节点或记录里操作。
+      </p>
 
-        <div className="mt-3 grid gap-2">
-        {producers.length === 0 ? (
-          <p className="text-[11px] leading-4 text-muted">还没有取值节点或记录内取值。</p>
-        ) : (
-          producers.map((producer) => {
-            const canvasNode =
-              producer.source === "canvas"
-                ? graph.nodes.find(
-                    (node): node is FlowExtractNode => node.id === producer.key,
-                  )
-                : undefined;
-            return (
-              <div
-                key={producer.key}
-                className="rounded-lg bg-paper px-2.5 py-2"
-              >
-                <div className="flex items-center gap-1.5">
-                  <Variable className="size-3.5 shrink-0 text-moss" />
-                  <VarNameInput
-                    className="h-7 min-w-0 flex-1 font-mono text-[11px] text-moss"
-                    value={producer.name}
-                    placeholder="变量名"
-                    onCommit={(next) =>
-                      onChange(
-                        renameExtractVar(
-                          graph,
-                          producer.key,
-                          producer.recordedName,
-                          producer.name,
-                          next,
-                        ),
-                      )
-                    }
-                  />
-                  <Badge variant="secondary">{consumersOf(producer.name)} 引用</Badge>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline">
-                    {producer.source === "canvas"
-                      ? "画布取值"
-                      : `记录「${producer.recordName ?? "已删除"}」`}
-                  </Badge>
-                  {!producer.enabled ? <Badge variant="amber">已禁用</Badge> : null}
-                  {canvasNode ? (
-                    <span className="truncate font-mono text-[9.5px] text-muted">
-                      {extractSummary(canvasNode)}
+      <div className="mt-3 overflow-x-auto rounded-lg border border-line">
+        <table className="w-full table-fixed text-left">
+          <thead className="whitespace-nowrap bg-paper text-[9.5px] font-medium text-muted">
+            <tr>
+              <th className="w-9 px-1.5 py-1.5">序号</th>
+              <th className="w-[22%] px-1.5 py-1.5">取值目标</th>
+              <th className="w-[37%] px-1.5 py-1.5">变量名</th>
+              <th className="w-[30%] px-1.5 py-1.5">值</th>
+            </tr>
+          </thead>
+          <tbody>
+            {producers.map((producer, index) => {
+              const { target, value } = describeVarProducer(graph, recordMap, producer);
+              const valueText =
+                value === undefined || value === null || value === ""
+                  ? "—"
+                  : String(value);
+              return (
+                <tr key={producer.key} className="border-t border-line">
+                  <td className="px-1.5 py-2 font-mono text-[9.5px] text-muted">
+                    {String(index + 1).padStart(2, "0")}
+                  </td>
+                  <td className="px-1.5 py-2 text-[10px] leading-4 text-ink/75">
+                    <span className="block truncate" title={target}>
+                      {target}
                     </span>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })
-        )}
+                  </td>
+                  <td className="px-1.5 py-2">
+                    <span
+                      className={cn(
+                        "block truncate font-mono text-[10.5px]",
+                        duplicateNames.has(producer.name) ? "text-danger" : "text-moss",
+                      )}
+                      title={producer.name}
+                    >
+                      {producer.name || "—"}
+                    </span>
+                  </td>
+                  <td className="px-1.5 py-2">
+                    <span
+                      className="block truncate font-mono text-[10px] text-muted"
+                      title={valueText}
+                    >
+                      {valueText}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {producers.length === 0 ? (
+              <tr className="border-t border-line">
+                <td
+                  colSpan={4}
+                  className="px-2 py-3 text-center text-[10.5px] text-muted"
+                >
+                  还没有取值节点或记录内取值。
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
 
       {duplicates.length > 0 ? (
@@ -1849,70 +1741,7 @@ function VarPanel({
           变量重名：{duplicates.join("、")}。同名产出无法编译，请改掉其中一个。
         </p>
       ) : null}
-      </InspectorCard>
-
-      <InspectorCard>
-        <InspectorSectionHeader
-          label="手工变量"
-          aside={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                onChange({
-                  ...graph,
-                  vars: [...graph.vars, { name: "", value: "" }],
-                })
-              }
-            >
-              <Plus className="size-3" />
-              新增变量
-            </Button>
-          }
-        />
-        <div className="mt-2.5 grid gap-2">
-          {graph.vars.map((item, index) => (
-            <div key={index} className="grid gap-1.5 rounded-lg bg-paper p-2">
-              <div className="flex items-center gap-1.5">
-                <VarNameInput
-                  className="h-7 font-mono text-[11px]"
-                  value={item.name}
-                  placeholder="变量名"
-                  onCommit={(next) => onChange(renameManualVar(graph, index, next))}
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label="删除变量"
-                  onClick={() =>
-                    onChange({
-                      ...graph,
-                      vars: graph.vars.filter((_, currentIndex) => currentIndex !== index),
-                    })
-                  }
-                >
-                  <Trash2 className="size-3.5" />
-                  删除
-                </Button>
-              </div>
-              <Input
-                className="h-7 text-[11px]"
-                value={item.value ?? ""}
-                placeholder="初始值"
-                onChange={(event) =>
-                  onChange({
-                    ...graph,
-                    vars: graph.vars.map((current, currentIndex) =>
-                      currentIndex === index ? { ...current, value: event.target.value } : current,
-                    ),
-                  })
-                }
-              />
-            </div>
-          ))}
-        </div>
-      </InspectorCard>
-    </>
+    </InspectorCard>
   );
 }
 
@@ -1997,7 +1826,7 @@ function InspectorTitle({ code, title }: { code: string; title: string }) {
       <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
         {code}
       </span>
-      <h2 className="mt-1.5 truncate text-[15px] font-semibold tracking-tight">{title}</h2>
+      <h2 className="mt-1.5 break-words text-[15px] font-semibold tracking-tight">{title}</h2>
     </div>
   );
 }

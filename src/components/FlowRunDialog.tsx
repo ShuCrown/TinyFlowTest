@@ -1489,9 +1489,14 @@ function RunStepCard({
     <li
       ref={(element) => registerRef(microId, element)}
       className={cn(
-        "rounded-lg border border-line px-2.5 py-2 transition-colors",
+        "rounded-lg border px-2.5 py-2 transition-colors",
+        // 状态边框直接沿用外框，避免和默认边框叠成双层描边。
+        active
+          ? status === "fail"
+            ? "border-danger/35"
+            : "border-running/35"
+          : "border-line",
         tone.row,
-        active && "ring-1 ring-running/25",
         status === "skipped" && "opacity-70",
       )}
     >

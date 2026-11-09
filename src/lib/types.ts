@@ -6,7 +6,6 @@ export interface TargetSystem {
   name: string;
   baseUrl: string;
   description?: string;
-  enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
