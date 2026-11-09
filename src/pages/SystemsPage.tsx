@@ -55,7 +55,7 @@ function SystemDialog({
       return;
     }
     if (!isHttpUrl(nextUrl)) {
-      setError("目标地址需要是完整的 http(s) 地址，例如 http://dev.example.com/dashboard。");
+      setError("目标地址需要是完整的网址，例如 http://dev.example.com/dashboard。");
       return;
     }
     setError("");
@@ -72,7 +72,7 @@ function SystemDialog({
     <Dialog
       open
       title={system ? "编辑系统" : "新增系统"}
-      description="系统地址会在录制与回放时作为同源代理目标使用；Token 可选，只保存在当前标签页。"
+      description="系统地址会在录制与回放时作为同源代理目标使用；登录令牌可选，只保存在当前标签页。"
       onClose={onClose}
       footer={
         <>
@@ -110,8 +110,8 @@ function SystemDialog({
           />
         </Field>
         <Field
-          label="登录 Token（可选）"
-          hint="只存当前标签页的 sessionStorage，刷新仍在、关闭标签页即清除；不会写入系统配置的 localStorage。"
+          label="登录令牌（可选）"
+          hint="只保存在当前标签页的会话存储，刷新仍在、关闭标签页即清除；不会写入系统配置的本地存储。"
         >
           <div className="relative">
             <input
@@ -120,7 +120,7 @@ function SystemDialog({
               type={showToken ? "text" : "password"}
               value={token}
               onChange={(event) => setToken(event.target.value)}
-              placeholder="Bearer token / access_token"
+              placeholder="粘贴登录令牌"
               autoComplete="off"
               spellCheck={false}
             />
@@ -212,9 +212,9 @@ export function SystemsPage() {
   return (
     <div className="pb-10">
       <PageHeader
-        code="SYS / SYSTEMS"
+        code="系统"
         title="系统管理"
-        description="维护被测系统的名称、目标地址与登录 Token。Token 仅保存在当前标签页的 sessionStorage，关闭标签页即清除；系统元数据仍按 localStorage 保存。"
+        description="维护被测系统的名称、目标地址与登录令牌。令牌仅保存在当前标签页的会话存储，关闭标签页即清除；系统资料仍保存在本地存储。"
         actions={
           <Button variant="default" onClick={openCreate}>
             <Plus />
@@ -226,7 +226,7 @@ export function SystemsPage() {
       {systems.length === 0 ? (
         <div className="mt-5">
           <EmptyState
-            code="SYS"
+            code="系统"
             title="还没有系统"
             description="先登记一个目标系统，后续新增操作记录时就能直接选择它。"
             action={
@@ -242,7 +242,7 @@ export function SystemsPage() {
           {systems.map((system) => (
             <ItemCard
               key={system.id}
-              code={`SYS-${system.id.slice(-4).toUpperCase()}`}
+              code={`系统-${system.id.slice(-4).toUpperCase()}`}
               title={system.name}
               badge={
                 <Badge variant={system.enabled ? "moss" : "secondary"}>
@@ -268,7 +268,7 @@ export function SystemsPage() {
               {system.description ? <div className="line-clamp-1">{system.description}</div> : null}
               <div className="flex flex-wrap items-center gap-1.5">
                 <Badge variant={sessionTokens.get(system.id) ? "moss" : "secondary"}>
-                  {sessionTokens.get(system.id) ? "Token 本会话" : "Token 未配置"}
+                  {sessionTokens.get(system.id) ? "令牌已配置" : "令牌未配置"}
                 </Badge>
                 <span>关联 {recordCounts.get(system.id) ?? 0} 条</span>
               </div>

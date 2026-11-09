@@ -310,10 +310,10 @@ function stepKind(node: FlowNode): string {
       node.source === "response"
         ? "接口"
         : node.source === "js"
-          ? "JS"
+          ? "脚本"
           : node.source === "const"
             ? "手动"
-            : "DOM";
+            : "页面";
     return `取值·${source}`;
   }
   return node.type === "navigate" ? "导航" : "等待";
@@ -1165,7 +1165,7 @@ function RunStatusOverview({
     <section className="shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
-          RUN STATUS
+          运行状态
         </span>
         <StepFilter
           filter={filter}
@@ -1254,7 +1254,7 @@ function RunVarsCard({ vars }: { vars: Record<string, unknown> }) {
   return (
     <section className="shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
       <div className="font-mono text-[10px] font-semibold tracking-[0.1em] text-muted">
-        ENV · 运行变量
+        运行变量
       </div>
       <div className="mt-2.5 flex flex-wrap gap-2">
         {entries.map(([name, value]) => (
@@ -1699,17 +1699,17 @@ function ExtractTuningConfig({
     editor.source === "response"
       ? "接口"
       : editor.source === "js"
-        ? "JS"
+        ? "脚本"
         : editor.source === "const"
           ? "手动"
           : editor.locate === "cell"
             ? "表格"
-            : "DOM";
+            : "页面";
   return (
     <div className="mt-1.5 grid gap-1 border-t border-line pt-1.5">
       <div className="flex items-center justify-between gap-1.5">
         <span className="min-w-0 flex-1 truncate font-mono text-[9.5px] text-muted">
-          ENV {node.varName || "未命名"} · {sourceLabel}
+          变量 {node.varName || "未命名"} · {sourceLabel}
         </span>
         {dirty ? (
           <Button

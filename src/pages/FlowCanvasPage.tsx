@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Background,
@@ -445,8 +445,8 @@ export function FlowCanvasPage() {
               ? systemNames.get(record.systemId) ?? "系统已删除"
               : "未绑定系统"
             : !hasExtractSteps(node)
-              ? "ENV · 未录制"
-              : `ENV · ${extractName || "未命名变量"}${recordedCount > 1 ? ` +${recordedCount - 1}` : ""}`;
+              ? "变量 · 未录制"
+              : `变量 · ${extractName || "未命名变量"}${recordedCount > 1 ? ` +${recordedCount - 1}` : ""}`;
         return {
           id: node.id,
           type: "flowNode",
@@ -792,7 +792,7 @@ export function FlowCanvasPage() {
             返回流程列表
           </Button>
           <div className="min-w-0">
-            <span className="tf-kicker">FLW / CANVAS</span>
+            <span className="tf-kicker">画布</span>
             <div className="mt-0.5 flex min-w-0 items-center gap-2">
               <h1 className="tf-display truncate text-[22px] leading-tight">{flow.name}</h1>
               {compiled.error ? <Badge variant="amber">草稿</Badge> : <Badge variant="moss">可运行</Badge>}
@@ -1035,7 +1035,7 @@ export function FlowCanvasPage() {
           </div>
         </div>
 
-        <aside className="tf-panel max-h-[70vh] min-h-0 overflow-y-auto p-4 xl:max-h-none">
+        <aside className="flex max-h-[70vh] min-h-0 flex-col gap-3 overflow-y-auto rounded-2xl border border-line bg-paper/70 p-3 xl:max-h-none">
           {selected ? (
             selected.kind === "record" ? (
               <RecordInspector
@@ -1137,7 +1137,7 @@ function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
             className="font-mono text-[10px] font-semibold tracking-[0.16em]"
             style={{ color: accent }}
           >
-            {node.kind === "record" ? "OP" : "CODE"}
+            {node.kind === "record" ? "记录" : "取值"}
           </span>
           <span className="truncate font-mono text-[9px] text-muted">
             {node.id.slice(-8)}
@@ -1146,17 +1146,17 @@ function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
         <div className="flex shrink-0 items-center gap-1">
           {data.entry ? (
             <span className="rounded border border-accent/30 bg-accent-soft px-1 font-mono text-[8px] text-accent">
-              ENTRY
+              入口
             </span>
           ) : null}
           {data.disabled ? (
             <span className="rounded border border-amber/30 bg-amber-soft px-1 font-mono text-[8px] text-amber">
-              OFF
+              停用
             </span>
           ) : null}
           {data.missing ? (
             <span className="rounded border border-danger/25 bg-[#fdf3f0] px-1 font-mono text-[8px] text-danger">
-              MISSING
+              缺失
             </span>
           ) : null}
         </div>
@@ -1205,8 +1205,8 @@ function RecordInspector({
 }) {
   if (!record) {
     return (
-      <div>
-        <InspectorTitle code="OP" title="记录已删除" />
+      <InspectorCard>
+        <InspectorTitle code="操作记录" title="记录已删除" />
         <p className="mt-2 text-[11.5px] leading-5 text-danger">
           这条操作记录不在本地存储里，请删除节点或重新录制。
         </p>
@@ -1214,7 +1214,7 @@ function RecordInspector({
           <Trash2 />
           删除节点
         </Button>
-      </div>
+      </InspectorCard>
     );
   }
 
@@ -1227,40 +1227,40 @@ function RecordInspector({
     ) ?? [];
 
   return (
-    <div>
-      <InspectorTitle code="OP" title={record.name} />
-      <div className="mt-1.5 flex flex-wrap gap-1">
-        <Badge variant="secondary">{record.nodes} 节点</Badge>
-        <Badge variant="secondary">{record.status === "ready" ? "已录制" : "草稿"}</Badge>
-        {node.enabled === false ? <Badge variant="amber">已禁用</Badge> : null}
-      </div>
-      <p className="mt-2 break-all font-mono text-[10px] text-muted">{record.targetUrl}</p>
-      <div className="mt-2 flex gap-2">
-        <Button size="sm" variant="outline" onClick={() => onPatch({ enabled: node.enabled === false })}>
-          {node.enabled === false ? <Power /> : <Ban />}
-          {node.enabled === false ? "启用记录" : "禁用记录"}
-        </Button>
-        <Button
-          size="sm"
-          variant="default"
-          onClick={onReplay}
-          disabled={!record.dsl}
-          title={record.dsl ? undefined : "这条记录还没有可执行节点"}
-        >
-          <Play />
-          回放
-        </Button>
-      </div>
+    <>
+      <InspectorCard>
+        <InspectorTitle code="操作记录" title={record.name} />
+        <div className="mt-2 flex flex-wrap gap-1">
+          <Badge variant="secondary">{record.nodes} 节点</Badge>
+          <Badge variant="secondary">{record.status === "ready" ? "已录制" : "草稿"}</Badge>
+          {node.enabled === false ? <Badge variant="amber">已禁用</Badge> : null}
+        </div>
+        <p className="mt-2 break-all font-mono text-[10px] text-muted">{record.targetUrl}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={() => onPatch({ enabled: node.enabled === false })}>
+            {node.enabled === false ? <Power /> : <Ban />}
+            {node.enabled === false ? "启用记录" : "禁用记录"}
+          </Button>
+          <Button
+            size="sm"
+            variant="default"
+            onClick={onReplay}
+            disabled={!record.dsl}
+            title={record.dsl ? undefined : "这条记录还没有可执行节点"}
+          >
+            <Play />
+            回放
+          </Button>
+        </div>
+      </InspectorCard>
 
       {recordExtracts.length > 0 ? (
-        <div className="mt-4 border-t border-line pt-3">
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
-              ENV · 记录内取值
-            </span>
-            <Badge variant="moss">{recordExtracts.length}</Badge>
-          </div>
-          <div className="mt-2 grid gap-1.5">
+        <InspectorCard>
+          <InspectorSectionHeader
+            label="记录内取值"
+            aside={<Badge variant="moss">{recordExtracts.length}</Badge>}
+          />
+          <div className="mt-2.5 grid gap-1.5">
             {recordExtracts.map((item) => {
               const name = effectiveExtractName(
                 graph,
@@ -1270,7 +1270,7 @@ function RecordInspector({
               return (
                 <div
                   key={item.id}
-                  className="flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5"
+                  className="flex items-center gap-1.5 rounded-lg bg-paper px-2.5 py-1.5"
                 >
                   <Variable className="size-3.5 shrink-0 text-moss" />
                   <VarNameInput
@@ -1285,37 +1285,39 @@ function RecordInspector({
                     {item.source === "response"
                       ? "接口"
                       : item.source === "js"
-                        ? "JS"
+                        ? "脚本"
                         : item.source === "const"
                           ? "手动"
-                          : item.read}
+                          : item.read === "value"
+                            ? "表单值"
+                            : item.read === "attribute"
+                              ? "属性"
+                              : "文本"}
                   </span>
                 </div>
               );
             })}
           </div>
-          <p className="mt-2 text-[10.5px] leading-4 text-muted">
+          <p className="mt-2.5 text-[10.5px] leading-4 text-muted">
             执行这条记录后写入环境变量，可在后续记录的槽位里选择；改名会同步本流程的引用和模板。
           </p>
-        </div>
+        </InspectorCard>
       ) : null}
 
-      <div className="mt-4 border-t border-line pt-3">
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
-            INJECT · 微调值
-          </span>
-          <Badge variant="secondary">{slots.length}</Badge>
-        </div>
+      <InspectorCard>
+        <InspectorSectionHeader
+          label="微调值"
+          aside={<Badge variant="secondary">{slots.length}</Badge>}
+        />
 
         {!record.dsl ? (
-          <p className="mt-2 text-[11px] leading-4 text-muted">这条记录还没有可执行节点。</p>
+          <p className="mt-2.5 text-[11px] leading-4 text-muted">这条记录还没有可执行节点。</p>
         ) : slots.length === 0 ? (
-          <p className="mt-2 text-[11px] leading-4 text-muted">
+          <p className="mt-2.5 text-[11px] leading-4 text-muted">
             录制里没有输入或筛选槽位。需要注入主键 code 时，请重录一条带筛选框的操作记录。
           </p>
         ) : (
-          <div className="mt-2 grid gap-2">
+          <div className="mt-2.5 grid gap-2">
             {slots.map((slot) => (
               <SlotEditor
                 key={slot.id}
@@ -1328,24 +1330,24 @@ function RecordInspector({
           </div>
         )}
 
-        <p className="mt-2 text-[10.5px] leading-4 text-muted">
+        <p className="mt-2.5 text-[10.5px] leading-4 text-muted">
           环境变量注入只在本流程「运行流程」时生效；画布「回放」和录制页的「开始回放」只使用记录自己的录制值/微调值。
         </p>
 
         {filterlessPickers.length > 0 ? (
-          <p className="mt-3 rounded-lg border border-amber/20 bg-amber-soft/60 px-2.5 py-2 text-[10.5px] leading-4 text-amber">
+          <p className="mt-2.5 rounded-lg border border-amber/20 bg-amber-soft/60 px-2.5 py-2 text-[10.5px] leading-4 text-amber">
             有 {filterlessPickers.length} 个选择器没有录到筛选框，只能沿用录制选项；需要筛选注入时请重录带占位值的模板。
           </p>
         ) : null}
-      </div>
+      </InspectorCard>
 
-      <div className="mt-4 border-t border-line pt-3">
+      <div className="shrink-0">
         <Button size="sm" variant="destructive" onClick={onDelete}>
           <Trash2 />
           从画布删除
         </Button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1513,53 +1515,55 @@ function ExtractInspector({
     ).length;
 
   return (
-    <div>
-      <InspectorTitle code="CODE" title={titleName || "取值节点"} />
-      <p className="mt-1 text-[11px] leading-4 text-muted">
-        在弹窗里录制真实操作和取值步骤；每个取值会生成一个环境变量。
-      </p>
+    <>
+      <InspectorCard>
+        <InspectorTitle code="取值节点" title={titleName || "取值节点"} />
+        <p className="mt-1.5 text-[11px] leading-4 text-muted">
+          在弹窗里录制真实操作和取值步骤；每个取值会生成一个环境变量。
+        </p>
 
-      <div className="mt-3 rounded-lg border border-line bg-white px-2.5 py-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-[11.5px] font-medium">录制步骤</div>
-            <div className="mt-0.5 text-[10.5px] leading-4 text-muted">
-              {recorded
-                ? `${recordedExtracts.length} 个录制取值、${manualRows.length} 个手动取值、${recorded.nodes.length - recordedExtracts.length} 个操作步骤。`
-                : manualRows.length > 0
-                  ? `${manualRows.length} 个手动取值。`
-                  : preStepCount > 0
-                    ? `已录制 ${preStepCount} 个前置步骤。`
-                    : "弹窗选择系统并录制真实操作，完成后保存到当前取值节点。"}
-              {!recordReady ? "请先到「系统管理」添加并启用一个系统。" : ""}
+        <div className="mt-3 rounded-lg bg-paper px-2.5 py-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11.5px] font-medium">录制步骤</div>
+              <div className="mt-0.5 text-[10.5px] leading-4 text-muted">
+                {recorded
+                  ? `${recordedExtracts.length} 个录制取值、${manualRows.length} 个手动取值、${recorded.nodes.length - recordedExtracts.length} 个操作步骤。`
+                  : manualRows.length > 0
+                    ? `${manualRows.length} 个手动取值。`
+                    : preStepCount > 0
+                      ? `已录制 ${preStepCount} 个前置步骤。`
+                      : "弹窗选择系统并录制真实操作，完成后保存到当前取值节点。"}
+                {!recordReady ? "请先到「系统管理」添加并启用一个系统。" : ""}
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+              {recorded || preStepCount > 0 ? (
+                <Button size="sm" variant="ghost" onClick={onClearRecording}>
+                  清除录制
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onRecordSteps}
+                disabled={!recordReady}
+              >
+                <Mic />
+                {recorded || preStepCount > 0 ? "重新录制" : "录制步骤"}
+              </Button>
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-            {recorded || preStepCount > 0 ? (
-              <Button size="sm" variant="ghost" onClick={onClearRecording}>
-                清除录制
-              </Button>
-            ) : null}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onRecordSteps}
-              disabled={!recordReady}
-            >
-              <Mic />
-              {recorded || preStepCount > 0 ? "重新录制" : "录制步骤"}
-            </Button>
-          </div>
         </div>
-      </div>
+      </InspectorCard>
 
       {recorded ? (
-        <div className="mt-3 rounded-lg border border-line bg-white">
-          <div className="flex items-center justify-between border-b border-line px-2.5 py-1.5">
-            <span className="text-[11.5px] font-medium">录制步骤</span>
-            <Badge variant="secondary">{recorded.nodes.length}</Badge>
-          </div>
-          <ol className="max-h-[200px] overflow-y-auto p-1.5">
+        <InspectorCard>
+          <InspectorSectionHeader
+            label="录制步骤"
+            aside={<Badge variant="secondary">{recorded.nodes.length}</Badge>}
+          />
+          <ol className="mt-2 grid max-h-[200px] gap-0.5 overflow-y-auto">
             {recorded.nodes.map((item, index) => (
               <li
                 key={item.id}
@@ -1582,21 +1586,23 @@ function ExtractInspector({
               </li>
             ))}
           </ol>
-        </div>
+        </InspectorCard>
       ) : null}
 
-      <div className="mt-3 rounded-lg border border-line bg-white">
-        <div className="flex items-center justify-between border-b border-line px-2.5 py-1.5">
-          <span className="text-[11.5px] font-medium">取值表格</span>
-          <div className="flex items-center gap-1.5">
-            <Badge variant="moss">{totalRows}</Badge>
-            <Button size="sm" variant="ghost" onClick={onAddManualRow}>
-              <Plus className="size-3" />
-              新增
-            </Button>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
+      <InspectorCard className="min-w-0">
+        <InspectorSectionHeader
+          label="取值表格"
+          aside={
+            <div className="flex items-center gap-1.5">
+              <Badge variant="moss">{totalRows}</Badge>
+              <Button size="sm" variant="ghost" onClick={onAddManualRow}>
+                <Plus className="size-3" />
+                新增
+              </Button>
+            </div>
+          }
+        />
+        <div className="mt-2 -mx-1 overflow-x-auto">
           <table className="w-full table-fixed text-left">
             <thead className="text-[9px] uppercase tracking-[0.1em] text-muted">
               <tr>
@@ -1741,15 +1747,15 @@ function ExtractInspector({
             </tbody>
           </table>
         </div>
-      </div>
+      </InspectorCard>
 
-      <div className="mt-4 border-t border-line pt-3">
+      <div className="shrink-0">
         <Button size="sm" variant="destructive" onClick={onDelete}>
           <Trash2 />
           从画布删除
         </Button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1775,14 +1781,15 @@ function VarPanel({
     .map(([name]) => name);
 
   return (
-    <div>
-      <InspectorTitle code="ENV" title="流程环境变量" />
-      <p className="mt-1 text-[11px] leading-4 text-muted">
-        画布取值和记录内取值产出的变量都在这里统一改名；改名会同步更新本流程的注入引用和
-        {" {{变量}} "}模板。也可以手工声明一个固定值。
-      </p>
+    <>
+      <InspectorCard>
+        <InspectorTitle code="变量" title="流程环境变量" />
+        <p className="mt-1.5 text-[11px] leading-4 text-muted">
+          画布取值和记录内取值产出的变量都在这里统一改名；改名会同步更新本流程的注入引用和
+          {" {{变量}} "}模板。也可以手工声明一个固定值。
+        </p>
 
-      <div className="mt-3 grid gap-2">
+        <div className="mt-3 grid gap-2">
         {producers.length === 0 ? (
           <p className="text-[11px] leading-4 text-muted">还没有取值节点或记录内取值。</p>
         ) : (
@@ -1796,7 +1803,7 @@ function VarPanel({
             return (
               <div
                 key={producer.key}
-                className="rounded-lg border border-line bg-white px-2.5 py-2"
+                className="rounded-lg bg-paper px-2.5 py-2"
               >
                 <div className="flex items-center gap-1.5">
                   <Variable className="size-3.5 shrink-0 text-moss" />
@@ -1838,33 +1845,34 @@ function VarPanel({
       </div>
 
       {duplicates.length > 0 ? (
-        <p className="mt-2 rounded-lg border border-danger/20 bg-[#fdf3f0] px-2.5 py-2 text-[10.5px] leading-4 text-danger">
+        <p className="mt-2.5 rounded-lg border border-danger/20 bg-[#fdf3f0] px-2.5 py-2 text-[10.5px] leading-4 text-danger">
           变量重名：{duplicates.join("、")}。同名产出无法编译，请改掉其中一个。
         </p>
       ) : null}
+      </InspectorCard>
 
-      <div className="mt-4 border-t border-line pt-3">
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
-            MANUAL
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              onChange({
-                ...graph,
-                vars: [...graph.vars, { name: "", value: "" }],
-              })
-            }
-          >
-            <Plus className="size-3" />
-            手工变量
-          </Button>
-        </div>
-        <div className="mt-2 grid gap-2">
+      <InspectorCard>
+        <InspectorSectionHeader
+          label="手工变量"
+          aside={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                onChange({
+                  ...graph,
+                  vars: [...graph.vars, { name: "", value: "" }],
+                })
+              }
+            >
+              <Plus className="size-3" />
+              新增变量
+            </Button>
+          }
+        />
+        <div className="mt-2.5 grid gap-2">
           {graph.vars.map((item, index) => (
-            <div key={index} className="grid gap-1.5 rounded-lg border border-line bg-white p-2">
+            <div key={index} className="grid gap-1.5 rounded-lg bg-paper p-2">
               <div className="flex items-center gap-1.5">
                 <VarNameInput
                   className="h-7 font-mono text-[11px]"
@@ -1903,8 +1911,8 @@ function VarPanel({
             </div>
           ))}
         </div>
-      </div>
-    </div>
+      </InspectorCard>
+    </>
   );
 }
 
@@ -1947,11 +1955,49 @@ function VarNameInput({
   );
 }
 
+function InspectorCard({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      className={cn(
+        "shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]",
+        className,
+      )}
+    >
+      {children}
+    </section>
+  );
+}
+
+function InspectorSectionHeader({
+  label,
+  aside,
+}: {
+  label: string;
+  aside?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-muted">
+        {label}
+      </span>
+      {aside}
+    </div>
+  );
+}
+
 function InspectorTitle({ code, title }: { code: string; title: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <Badge variant="accent">{code}</Badge>
-      <h2 className="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-tight">{title}</h2>
+    <div className="min-w-0">
+      <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
+        {code}
+      </span>
+      <h2 className="mt-1.5 truncate text-[15px] font-semibold tracking-tight">{title}</h2>
     </div>
   );
 }
