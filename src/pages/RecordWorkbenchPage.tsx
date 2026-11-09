@@ -705,7 +705,7 @@ export function RecordWorkbenchPage() {
     <div className="flex flex-col pb-10 xl:h-[calc(100vh-48px)] xl:overflow-hidden xl:pb-0">
       <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
         <div className="flex min-w-0 items-start gap-3">
-          <Button variant="outline" onClick={() => navigate("/records")}>
+          <Button size="sm" variant="outline" onClick={() => navigate("/records")}>
             <ArrowLeft />
             返回记录列表
           </Button>
@@ -720,6 +720,7 @@ export function RecordWorkbenchPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={phaseBadge.variant}>{phaseBadge.label}</Badge>
           <Button
+            size="sm"
             variant="outline"
             onClick={save}
             disabled={!result || steps.length === 0 || recording || busy || replaying}
@@ -730,19 +731,24 @@ export function RecordWorkbenchPage() {
           {recording ? (
             <>
               <Button
+                size="sm"
                 variant={valueMode ? "default" : "outline"}
                 onClick={toggleValueMode}
               >
                 <Crosshair />
                 {valueMode ? "取消取值" : "录制取值"}
               </Button>
-              <Button variant="destructive" onClick={stopRecording}>
+              <Button size="sm" variant="destructive" onClick={stopRecording}>
                 <Square />
                 停止并生成
               </Button>
             </>
           ) : (
-            <Button onClick={() => void startRecording()} disabled={busy || replaying}>
+            <Button
+              size="sm"
+              onClick={() => void startRecording()}
+              disabled={busy || replaying}
+            >
               {busy ? <Loader2 className="animate-spin" /> : hasDraft ? <RefreshCw /> : <Mic />}
               {busy ? "加载中…" : hasDraft ? "重新录制" : "开始录制"}
             </Button>

@@ -918,7 +918,7 @@ export function FlowRunDialog({
       }}
     >
       <DialogContent className="w-[95vw] max-w-[95vw] overflow-hidden">
-        <DialogHeader>
+        <DialogHeader className="pb-2.5 pt-3">
           <DialogTitle className="flex items-center gap-2">
             <Play className="size-4 text-accent" />
             运行流程 · {flow.name}
@@ -929,7 +929,7 @@ export function FlowRunDialog({
         </DialogHeader>
 
         <DialogBody className="min-h-0 flex-1 overflow-hidden p-0">
-          <div className="flex h-[calc(100vh-190px)] min-h-[460px] flex-col lg:flex-row">
+          <div className="flex h-[calc(100vh-152px)] min-h-[460px] flex-col lg:flex-row">
             <div className="relative min-h-[320px] flex-1 bg-white">
               <iframe
                 ref={frameRef}
@@ -956,7 +956,7 @@ export function FlowRunDialog({
               ) : null}
             </div>
 
-            <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto border-t border-line bg-paper/70 p-3 lg:w-[460px] lg:border-l lg:border-t-0">
+            <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto border-t border-line bg-paper/70 p-3 lg:min-h-0 lg:w-[460px] lg:border-l lg:border-t-0">
               <RunStatusOverview
                 phaseLabel={PHASE_LABEL[phase]}
                 phaseVariant={phaseVariant}
@@ -1053,36 +1053,41 @@ export function FlowRunDialog({
           </div>
         </DialogBody>
 
-        <DialogFooter className="shrink-0 sm:justify-between">
+        <DialogFooter className="shrink-0 py-2 sm:justify-between">
           <span className="flex items-center gap-1.5 text-[11px] text-muted">
             <TriangleAlert className="size-3.5" />
             运行会真实写入目标系统数据，重复执行可能产生重复记录。
           </span>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={onClose}>
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" variant="outline" onClick={onClose}>
               <X />
               关闭
             </Button>
             {active ? (
               <>
                 {phase === "paused" ? (
-                  <Button variant="default" onClick={resume}>
+                  <Button size="sm" variant="default" onClick={resume}>
                     <Play />
                     继续
                   </Button>
                 ) : phase === "intervening" ? null : (
-                  <Button variant="outline" onClick={pause} disabled={phase !== "running"}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={pause}
+                    disabled={phase !== "running"}
+                  >
                     <Pause />
                     暂停
                   </Button>
                 )}
-                <Button variant="destructive" onClick={stop}>
+                <Button size="sm" variant="destructive" onClick={stop}>
                   <Loader2 className="animate-spin" />
                   停止
                 </Button>
               </>
             ) : (
-              <Button variant="default" onClick={() => void start()}>
+              <Button size="sm" variant="default" onClick={() => void start()}>
                 <Play />
                 {phase === "login" ? "重新运行" : "开始运行"}
               </Button>
@@ -1337,8 +1342,8 @@ function RunStepsPanel({
   }
 
   return (
-    <section className="shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
-      <div className="flex items-center justify-between gap-2">
+    <section className="flex min-h-[220px] min-w-0 flex-1 flex-col rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
+      <div className="flex shrink-0 items-center justify-between gap-2">
         <h3 className="text-[13px] font-semibold">节点步骤</h3>
         <span className="text-[10.5px] text-muted">按执行顺序 · 同组共享容器</span>
       </div>
@@ -1348,7 +1353,7 @@ function RunStepsPanel({
           {steps.length === 0 ? "画布没有可执行的节点。" : "没有可微调的节点。"}
         </p>
       ) : (
-        <div className="mt-3 grid gap-3">
+        <div className="mt-3 grid min-h-0 flex-1 content-start gap-3 overflow-y-auto pr-1">
           {groups.map((group) => (
             <div key={group.key}>
               <RunGroupHeader

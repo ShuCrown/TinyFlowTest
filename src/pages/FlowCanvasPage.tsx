@@ -787,7 +787,7 @@ export function FlowCanvasPage() {
     <div className="flex flex-col pb-4 xl:h-[calc(100vh-32px)] xl:overflow-hidden xl:pb-0">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
         <div className="flex min-w-0 items-center gap-3">
-          <Button variant="outline" onClick={() => navigate("/flows")}>
+          <Button size="sm" variant="outline" onClick={() => navigate("/flows")}>
             <ArrowLeft />
             返回流程列表
           </Button>
@@ -805,11 +805,12 @@ export function FlowCanvasPage() {
               {statusText}
             </span>
           ) : null}
-          <Button variant="outline" onClick={save}>
+          <Button size="sm" variant="outline" onClick={save}>
             <Save />
             保存画布
           </Button>
           <Button
+            size="sm"
             variant="default"
             onClick={() => setRunOpen(true)}
             disabled={Boolean(compiled.error) || graph.nodes.length === 0}
@@ -823,7 +824,7 @@ export function FlowCanvasPage() {
 
       <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
         <div className="relative">
-          <Button variant="default" onClick={() => setAddOpen((value) => !value)}>
+          <Button size="sm" variant="default" onClick={() => setAddOpen((value) => !value)}>
             <Plus />
             添加节点
           </Button>
