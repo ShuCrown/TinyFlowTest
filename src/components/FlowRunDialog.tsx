@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
   Loader2,
@@ -23,14 +23,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Dialog,
   DialogBody,
   DialogContent,
@@ -51,7 +43,7 @@ import { injectSystemToken } from "@/lib/session";
 import { compileFlow } from "@/flow/compile.ts";
 import { createIframeHost, runFlow, type ReplayNodeStatus } from "@/replay/index.ts";
 import type { NodeFailureDecision, NodeFailureInfo } from "@/replay/index.ts";
-import type { ExtractNode, InteractNode, PickerNode, ValueLike } from "@/dsl/index.ts";
+import type { ExtractNode, FlowNode, InteractNode, PickerNode, ValueLike } from "@/dsl/index.ts";
 import type { FlowItem, OperationRecord } from "@/lib/types";
 import { effectiveExtractName } from "@/flow/vars";
 import {
@@ -93,16 +85,17 @@ interface PickerDraft {
   on: "item" | "row";
 }
 
-interface TunableNode {
+interface RunStep {
   microId: string;
-  node: InteractNode | PickerNode | ExtractNode;
+  node: FlowNode;
+  groupId?: string;
+  groupLabel: string;
+  /** 全局执行序号（1 基），与运行日志同序。 */
+  index: number;
+  tunable: "interact" | "picker" | "extract" | null;
 }
 
-interface TuningGroup {
-  macroId: string;
-  recordName: string;
-  nodes: TunableNode[];
-}
+type StepStatus = "pending" | RunItem["status"];
 
 const EDITABLE_INTERACT = new Set(["input", "select", "nativeSelect", "check"]);
 
@@ -111,6 +104,17 @@ const PICKER_STRATEGY_LABEL: Record<PickerStrategy, string> = {
   byRow: "按行文本",
   byIndex: "按位置",
   firstVisible: "筛选后第一项",
+};
+
+const INTERACT_KIND: Record<string, string> = {
+  input: "输入",
+  select: "下拉",
+  nativeSelect: "下拉",
+  check: "勾选",
+  click: "点击",
+  press: "按键",
+  hover: "悬停",
+  upload: "上传",
 };
 
 const PHASE_LABEL: Record<RunPhase, string> = {
@@ -124,17 +128,43 @@ const PHASE_LABEL: Record<RunPhase, string> = {
   failed: "失败",
 };
 
-const ITEM_BADGE: Record<
-  RunItem["status"],
-  { label: string; variant: "secondary" | "moss" | "accent" | "amber" | "destructive" }
-> = {
-  running: { label: "执行中", variant: "secondary" },
+type BadgeVariant =
+  | "secondary"
+  | "moss"
+  | "accent"
+  | "amber"
+  | "destructive"
+  | "running";
+
+const ITEM_BADGE: Record<RunItem["status"], { label: string; variant: BadgeVariant }> = {
+  running: { label: "执行中", variant: "running" },
   pass: { label: "通过", variant: "moss" },
   healed: { label: "自愈", variant: "amber" },
   manual: { label: "人工完成", variant: "accent" },
   fail: { label: "失败", variant: "destructive" },
   skipped: { label: "跳过", variant: "secondary" },
 };
+
+const STEP_BADGE: Record<StepStatus, { label: string; variant: BadgeVariant }> = {
+  pending: { label: "待执行", variant: "secondary" },
+  ...ITEM_BADGE,
+};
+
+/** 中性行底 + 状态圆点 + 状态文字；只有执行中/失败用浅色底，其余状态保持安静。 */
+const STEP_TONE: Record<StepStatus, { row: string; dot: string; text: string }> = {
+  pending: { row: "bg-panel", dot: "border border-muted/40", text: "text-[#9a968c]" },
+  running: { row: "bg-running/10", dot: "bg-running ring-2 ring-running/20", text: "text-running" },
+  pass: { row: "bg-panel", dot: "bg-moss", text: "text-moss" },
+  healed: { row: "bg-panel", dot: "bg-amber", text: "text-amber" },
+  manual: { row: "bg-panel", dot: "bg-accent", text: "text-accent" },
+  fail: { row: "bg-danger/10", dot: "bg-danger ring-2 ring-danger/20", text: "text-danger" },
+  skipped: { row: "bg-panel", dot: "border border-muted/30", text: "text-[#9a968c]" },
+};
+
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
 
 function readValueText(value: unknown): string {
   if (typeof value === "string") return value;
@@ -201,10 +231,99 @@ function pickerOverrideOf(draft: PickerDraft): Record<string, unknown> {
   return override;
 }
 
-function interactDefaultText(node: InteractNode): string {
-  return node.adapter === "check"
-    ? String(node.checked ?? literalText(node.value) === "true")
-    : literalText(node.value);
+/** 输入/勾选的默认值：记录级微调值优先，其次是录制值。 */
+function interactBaseline(node: InteractNode, override: unknown): string {
+  if (node.adapter === "check") {
+    if (typeof override === "boolean") return String(override);
+    const text = readValueText(override);
+    if (text === "true" || text === "false") return text;
+    return String(node.checked ?? literalText(node.value) === "true");
+  }
+  if (override !== undefined && override !== null) return readValueText(override);
+  return literalText(node.value);
+}
+
+/** 选择器的默认草稿：记录级微调值覆盖录制值。 */
+function pickerBaseline(node: PickerNode, override: unknown): PickerDraft {
+  const base = defaultPickerDraft(node);
+  if (!override || typeof override !== "object" || Array.isArray(override)) return base;
+  const record = override as {
+    strategy?: unknown;
+    filters?: unknown;
+    picks?: unknown;
+    indexes?: unknown;
+    on?: unknown;
+  };
+  return {
+    strategy:
+      record.strategy === "byText" ||
+      record.strategy === "byRow" ||
+      record.strategy === "byIndex" ||
+      record.strategy === "firstVisible"
+        ? record.strategy
+        : base.strategy,
+    filters: Array.isArray(record.filters)
+      ? record.filters.map((item) => String(item))
+      : base.filters,
+    picks: Array.isArray(record.picks) ? record.picks.map((item) => String(item)) : base.picks,
+    indexes: Array.isArray(record.indexes)
+      ? record.indexes.map((item) => String(item))
+      : base.indexes,
+    on: record.on === "item" || record.on === "row" ? record.on : base.on,
+  };
+}
+
+function sameTextList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function pickerDraftEquals(a: PickerDraft, b: PickerDraft): boolean {
+  if (a.strategy !== b.strategy || a.on !== b.on) return false;
+  if (!sameTextList(a.filters, b.filters)) return false;
+  return a.strategy === "byIndex"
+    ? sameTextList(a.indexes, b.indexes)
+    : sameTextList(a.picks, b.picks);
+}
+
+function stepLabel(node: FlowNode): string {
+  switch (node.type) {
+    case "interact":
+      return node.target.label ?? node.name ?? node.id;
+    case "picker":
+      return node.trigger.label ?? node.name ?? node.id;
+    case "extract":
+      return node.source === "response" || node.source === "js" || node.source === "const"
+        ? (node.name ?? node.varName ?? node.id)
+        : (node.target.label ?? node.name ?? node.varName ?? node.id);
+    case "navigate":
+      return node.name ?? "页面导航";
+    case "wait":
+      return node.name ?? "等待";
+  }
+}
+
+function stepKind(node: FlowNode): string {
+  if (node.type === "interact") return INTERACT_KIND[node.adapter] ?? node.adapter;
+  if (node.type === "picker") return "选择器";
+  if (node.type === "extract") {
+    const source =
+      node.source === "response"
+        ? "接口"
+        : node.source === "js"
+          ? "JS"
+          : node.source === "const"
+            ? "手动"
+            : "DOM";
+    return `取值·${source}`;
+  }
+  return node.type === "navigate" ? "导航" : "等待";
+}
+
+function tunableKindOf(node: FlowNode): RunStep["tunable"] {
+  if (node.type === "interact") return EDITABLE_INTERACT.has(node.adapter) ? "interact" : null;
+  if (node.type === "picker") return "picker";
+  if (node.type === "extract") return "extract";
+  return null;
 }
 
 function loadFrame(frame: HTMLIFrameElement, source: string): Promise<Document> {
@@ -260,10 +379,11 @@ export function FlowRunDialog({
   const [extractValue, setExtractValue] = useState("");
   const [frameUrl, setFrameUrl] = useState("");
   const [proxyConfig, setProxyConfig] = useState<ProxyConfig | null>(null);
-  const [asideTab, setAsideTab] = useState<"run" | "tune">("run");
   const [inputTuning, setInputTuning] = useState<Record<string, string>>({});
   const [pickerTuning, setPickerTuning] = useState<Record<string, PickerDraft>>({});
   const [extractTuning, setExtractTuning] = useState<Record<string, ExtractEditor>>({});
+  const [stepFilter, setStepFilter] = useState<"all" | "tunable">("all");
+  const stepRefs = useRef(new Map<string, HTMLLIElement>());
 
   const recordMap = useMemo(() => new Map(records.map((record) => [record.id, record])), [records]);
   const compiledState = useMemo(() => {
@@ -294,53 +414,143 @@ export function FlowRunDialog({
     return labels;
   }, [flow.graph, recordMap]);
 
-  const tuningGroups = useMemo<TuningGroup[]>(() => {
-    const dsl = compiledState.value?.dsl;
-    if (!dsl) return [];
-    const groups: TuningGroup[] = [];
-    const byMacro = new Map<string, TuningGroup>();
-    for (const node of flow.graph?.nodes ?? []) {
-      if (node.kind !== "record") continue;
-      const group: TuningGroup = {
-        macroId: node.id,
-        recordName: recordMap.get(node.recordId)?.name ?? "记录已删除",
-        nodes: [],
-      };
-      groups.push(group);
-      byMacro.set(node.id, group);
+  // 与运行引擎同构：从 entry 沿第一条出边走到底，显示顺序即执行顺序。
+  const executionSteps = useMemo<RunStep[]>(() => {
+    const compiled = compiledState.value;
+    if (!compiled) return [];
+    const dsl = compiled.dsl;
+    const byId = new Map(dsl.nodes.map((node) => [node.id, node]));
+    const nextById = new Map<string, string>();
+    for (const edge of dsl.edges) {
+      if (!nextById.has(edge.from)) nextById.set(edge.from, edge.to);
     }
-    for (const node of dsl.nodes) {
-      const macroId = typeof node.meta?.flowNodeId === "string" ? node.meta.flowNodeId : "";
-      const group = byMacro.get(macroId);
-      if (!group) continue;
-      if (node.type === "interact") {
-        if (!EDITABLE_INTERACT.has(node.adapter)) continue;
-        group.nodes.push({ microId: node.id, node });
-      } else if (node.type === "picker" || node.type === "extract") {
-        group.nodes.push({ microId: node.id, node });
+    const steps: RunStep[] = [];
+    const seen = new Set<string>();
+    let current: string | undefined = dsl.entry;
+    while (current && !seen.has(current)) {
+      const node = byId.get(current);
+      if (!node) break;
+      seen.add(current);
+      const groupId =
+        typeof node.meta?.flowNodeId === "string" ? node.meta.flowNodeId : undefined;
+      steps.push({
+        microId: node.id,
+        node,
+        groupId,
+        groupLabel: groupId ? (groupLabels.get(groupId) ?? groupId) : "独立步骤",
+        index: steps.length + 1,
+        tunable: tunableKindOf(node),
+      });
+      current = nextById.get(current);
+    }
+    return steps;
+  }, [compiledState.value, groupLabels]);
+
+  const unreachableCount = Math.max(
+    0,
+    (compiledState.value?.dsl.nodes.length ?? 0) - executionSteps.length,
+  );
+
+  const itemMap = useMemo(
+    () => new Map(items.map((item) => [item.nodeId, item])),
+    [items],
+  );
+
+  const injectionLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const injection of flow.graph?.injections ?? []) {
+      const microId = `${injection.recordNodeId}::${injection.dslNodeId}`;
+      const source =
+        injection.source.kind === "var"
+          ? `变量 ${injection.source.name}`
+          : `字面值 ${injection.source.value === "" ? "空" : injection.source.value}`;
+      labels.set(
+        injection.slot === "filter"
+          ? `${microId}|filter|${injection.index ?? 0}`
+          : `${microId}|input`,
+        source,
+      );
+    }
+    return labels;
+  }, [flow.graph]);
+
+  const dirtyIds = useMemo(() => {
+    const dirty = new Set<string>();
+    const overrides = compiledState.value?.values ?? {};
+    for (const step of executionSteps) {
+      const { node, microId } = step;
+      if (node.type === "interact" && EDITABLE_INTERACT.has(node.adapter)) {
+        const value = inputTuning[microId];
+        if (value !== undefined && value !== interactBaseline(node, overrides[microId])) {
+          dirty.add(microId);
+        }
+      } else if (node.type === "picker") {
+        const draft = pickerTuning[microId];
+        if (draft && !pickerDraftEquals(draft, pickerBaseline(node, overrides[microId]))) {
+          dirty.add(microId);
+        }
+      } else if (node.type === "extract") {
+        const editor = extractTuning[microId];
+        if (
+          editor &&
+          extractTuningDiff(editor, extractEditorOf(node, overrides[microId])).tuning
+        ) {
+          dirty.add(microId);
+        }
       }
     }
-    for (const node of flow.graph?.nodes ?? []) {
-      if (node.kind !== "extract") continue;
-      const tunable = dsl.nodes.filter(
-        (item): item is InteractNode | PickerNode | ExtractNode =>
-          item.meta?.flowNodeId === node.id &&
-          ((item.type === "interact" && EDITABLE_INTERACT.has(item.adapter)) ||
-            item.type === "picker" ||
-            item.type === "extract"),
-      );
-      if (tunable.length === 0) continue;
-      const primary = tunable.find((item): item is ExtractNode => item.type === "extract");
-      const name =
-        primary?.varName || effectiveExtractName(flow.graph, node.id, node.varName);
-      groups.push({
-        macroId: node.id,
-        recordName: `取值 ${name || "未命名"}`,
-        nodes: tunable.map((item) => ({ microId: item.id, node: item })),
-      });
+    return dirty;
+  }, [executionSteps, inputTuning, pickerTuning, extractTuning, compiledState.value]);
+
+  const activeMicroId = useMemo(() => {
+    const running = items.find((item) => item.status === "running");
+    if (running) return running.nodeId;
+    if (phase === "intervening") {
+      return [...items].reverse().find((item) => item.status === "fail")?.nodeId;
     }
-    return groups;
-  }, [compiledState.value, flow.graph, recordMap]);
+    if (phase === "paused") {
+      const done = new Set(items.map((item) => item.nodeId));
+      return executionSteps.find((step) => !done.has(step.microId))?.microId;
+    }
+    return undefined;
+  }, [items, phase, executionSteps]);
+
+  useEffect(() => {
+    if (!activeMicroId) return;
+    stepRefs.current
+      .get(activeMicroId)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [activeMicroId]);
+
+  const runSummary = useMemo(() => {
+    const total = executionSteps.length;
+    let done = 0;
+    let failed = 0;
+    let elapsedMs = 0;
+    for (const step of executionSteps) {
+      const item = itemMap.get(step.microId);
+      const status = item?.status;
+      if (status === "pass" || status === "healed" || status === "manual" || status === "skipped")
+        done += 1;
+      if (status === "fail") failed += 1;
+      elapsedMs += item?.durationMs ?? 0;
+    }
+    const activeStep = activeMicroId
+      ? executionSteps.find((step) => step.microId === activeMicroId)
+      : undefined;
+    const settled = done + failed;
+    return {
+      total,
+      done,
+      failed,
+      elapsedMs,
+      tunable: executionSteps.filter((step) => step.tunable).length,
+      currentStep:
+        activeStep?.index ?? (phase === "finished" ? total : Math.min(total, settled + 1)),
+      currentLabel: activeStep ? stepLabel(activeStep.node) : undefined,
+      percent: total > 0 ? Math.round((settled / total) * 100) : 0,
+    };
+  }, [executionSteps, itemMap, activeMicroId, phase]);
 
   const setInputTuningValue = (microNodeId: string, value: string): void => {
     setInputTuning((current) => {
@@ -362,10 +572,30 @@ export function FlowRunDialog({
     node: PickerNode,
     patch: Partial<PickerDraft>,
   ): void => {
-    const next = { ...(pickerTuning[microNodeId] ?? defaultPickerDraft(node)), ...patch };
-    setPickerTuning((current) => ({ ...current, [microNodeId]: next }));
+    const baseline = pickerBaseline(node, compiledState.value?.values?.[microNodeId]);
+    const next = { ...(pickerTuning[microNodeId] ?? baseline), ...patch };
+    const dirty = !pickerDraftEquals(next, baseline);
+    setPickerTuning((current) => {
+      const copy = { ...current };
+      if (dirty) copy[microNodeId] = next;
+      else delete copy[microNodeId];
+      return copy;
+    });
     const runtime = runtimeValuesRef.current;
-    if (runtime) runtime[microNodeId] = pickerOverrideOf(next);
+    if (runtime) {
+      if (dirty) runtime[microNodeId] = pickerOverrideOf(next);
+      else delete runtime[microNodeId];
+    }
+  };
+
+  const resetPickerTuning = (microNodeId: string): void => {
+    setPickerTuning((current) => {
+      const next = { ...current };
+      delete next[microNodeId];
+      return next;
+    });
+    const runtime = runtimeValuesRef.current;
+    if (runtime) delete runtime[microNodeId];
   };
 
   const patchExtractTuning = (
@@ -373,11 +603,18 @@ export function FlowRunDialog({
     node: ExtractNode,
     editor: ExtractEditor,
   ): void => {
-    setExtractTuning((current) => ({ ...current, [microNodeId]: editor }));
+    const baseline = extractEditorOf(node, compiledState.value?.values?.[microNodeId]);
+    const dirty = extractTuningDiff(editor, baseline).tuning !== null;
+    setExtractTuning((current) => {
+      const next = { ...current };
+      if (dirty) next[microNodeId] = editor;
+      else delete next[microNodeId];
+      return next;
+    });
     const runtime = runtimeValuesRef.current;
     if (!runtime) return;
     const diff = extractTuningDiff(editor, recordedExtractEditor(node)).tuning;
-    if (diff) runtime[microNodeId] = diff;
+    if (dirty && diff) runtime[microNodeId] = diff;
     else delete runtime[microNodeId];
   };
 
@@ -539,7 +776,7 @@ export function FlowRunDialog({
         onBeforeNode: async () => {
           if (!pausedRef.current) return;
           setPhase("paused");
-          setStatusText("已暂停：可在「微调」里改后续表单，完成后点「继续」。");
+          setStatusText("已暂停：可在下方待执行步骤里改值，完成后点「继续」。");
           await new Promise<void>((resolve) => {
             resumeRef.current = resolve;
           });
@@ -660,21 +897,17 @@ export function FlowRunDialog({
     }
   };
 
-  const tunedCount =
-    Object.keys(inputTuning).length +
-    Object.keys(pickerTuning).length +
-    Object.keys(extractTuning).length;
   const active =
     phase === "running" || phase === "loading" || phase === "paused" || phase === "intervening";
-  const phaseVariant =
+  const phaseVariant: BadgeVariant =
     phase === "finished"
       ? "moss"
       : phase === "failed" || phase === "intervening"
         ? "destructive"
         : phase === "login" || phase === "paused"
           ? "amber"
-          : phase === "running"
-            ? "accent"
+          : phase === "running" || phase === "loading"
+            ? "running"
             : "secondary";
 
   return (
@@ -723,17 +956,18 @@ export function FlowRunDialog({
               ) : null}
             </div>
 
-            <aside className="flex w-full shrink-0 flex-col border-t border-line bg-panel/70 lg:w-[460px] lg:border-l lg:border-t-0">
-              <div className="border-b border-line px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[12px] font-semibold">运行状态</span>
-                  <Badge variant={phaseVariant}>{PHASE_LABEL[phase]}</Badge>
-                </div>
-                <p className="mt-1 break-words text-[11.5px] leading-5 text-muted">{statusText}</p>
-              </div>
+            <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto border-t border-line bg-paper/70 p-3 lg:w-[460px] lg:border-l lg:border-t-0">
+              <RunStatusOverview
+                phaseLabel={PHASE_LABEL[phase]}
+                phaseVariant={phaseVariant}
+                statusText={statusText}
+                summary={runSummary}
+                filter={stepFilter}
+                onFilterChange={setStepFilter}
+              />
 
               {phase === "intervening" && failure ? (
-                <div className="shrink-0 border-b border-danger/20 bg-[#fdf3f0] px-4 py-3">
+                <div className="shrink-0 rounded-2xl border border-danger/20 bg-[#fdf3f0] p-3.5">
                   <div className="flex items-center gap-1.5 text-[12px] font-semibold text-danger">
                     <TriangleAlert className="size-3.5" />
                     节点失败：{failure.name ?? failure.nodeId}
@@ -785,90 +1019,36 @@ export function FlowRunDialog({
                 </div>
               ) : null}
 
-              <div className="flex shrink-0 border-b border-line">
-                <button
-                  type="button"
-                  className={cn(
-                    "flex-1 border-r border-line px-3 py-2 text-[11.5px] font-medium transition-colors",
-                    asideTab === "run" ? "bg-white text-ink" : "text-muted hover:text-ink",
-                  )}
-                  onClick={() => setAsideTab("run")}
-                >
-                  执行
-                </button>
-                <button
-                  type="button"
-                  className={cn(
-                    "flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-[11.5px] font-medium transition-colors",
-                    asideTab === "tune" ? "bg-white text-ink" : "text-muted hover:text-ink",
-                  )}
-                  onClick={() => setAsideTab("tune")}
-                >
-                  <SlidersHorizontal className="size-3.5" />
-                  微调
-                  {tunedCount > 0 ? <Badge variant="amber">{tunedCount}</Badge> : null}
-                </button>
-              </div>
+              <RunMetrics summary={runSummary} dirtyCount={dirtyIds.size} />
 
-              {asideTab === "tune" ? (
-                <TuningPanel
-                  groups={tuningGroups}
-                  items={items}
-                  inputValues={inputTuning}
-                  pickerValues={pickerTuning}
-                  extractValues={extractTuning}
-                  valueOverrides={compiledState.value?.values ?? {}}
-                  onInputChange={setInputTuningValue}
-                  onPickerChange={patchPickerTuning}
-                  onExtractChange={patchExtractTuning}
-                />
-              ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-                {items.length === 0 ? (
-                  <p className="text-[11.5px] leading-5 text-muted">还没有执行节点。</p>
-                ) : (
-                  <ol className="grid gap-2">
-                    {items.map((item) => (
-                      <li key={item.nodeId} className="rounded-lg border border-line bg-white px-2.5 py-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium">
-                            {item.name ?? item.nodeId}
-                          </span>
-                          {item.durationMs !== undefined ? (
-                            <span className="font-mono text-[9.5px] text-muted">{item.durationMs}ms</span>
-                          ) : null}
-                          <Badge variant={ITEM_BADGE[item.status].variant}>
-                            {ITEM_BADGE[item.status].label}
-                          </Badge>
-                        </div>
-                        <div className="mt-0.5 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted">
-                          {item.groupId ? (groupLabels.get(item.groupId) ?? item.groupId) : "—"}
-                        </div>
-                        <p className="mt-0.5 break-words text-[10.5px] leading-4 text-muted">
-                          {item.message}
-                        </p>
-                      </li>
-                    ))}
-                  </ol>
-                )}
+              <RunStepsPanel
+                steps={executionSteps}
+                itemMap={itemMap}
+                activeMicroId={activeMicroId}
+                dirtyIds={dirtyIds}
+                inputValues={inputTuning}
+                pickerValues={pickerTuning}
+                extractValues={extractTuning}
+                valueOverrides={compiledState.value?.values ?? {}}
+                injectionLabels={injectionLabels}
+                filter={stepFilter}
+                onInputChange={setInputTuningValue}
+                onPickerChange={patchPickerTuning}
+                onPickerReset={resetPickerTuning}
+                onExtractChange={patchExtractTuning}
+                registerRef={(microId, element) => {
+                  if (element) stepRefs.current.set(microId, element);
+                  else stepRefs.current.delete(microId);
+                }}
+              />
 
-                {Object.keys(vars).length > 0 ? (
-                  <div className="mt-4 rounded-lg border border-line bg-white p-2.5">
-                    <div className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted">
-                      ENV · 运行变量
-                    </div>
-                    <div className="mt-1.5 grid gap-1">
-                      {Object.entries(vars).map(([name, value]) => (
-                        <div key={name} className="flex items-start gap-2 text-[11px]">
-                          <span className="shrink-0 font-mono text-accent">{name}</span>
-                          <span className="min-w-0 break-all text-muted">{String(value)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-              )}
+              <RunVarsCard vars={vars} />
+
+              {unreachableCount > 0 ? (
+                <div className="rounded-xl bg-amber-soft/70 px-3 py-2 text-[10.5px] leading-4 text-amber">
+                  还有 {unreachableCount} 个节点不在执行链上，不会被执行。
+                </div>
+              ) : null}
             </aside>
           </div>
         </DialogBody>
@@ -914,249 +1094,602 @@ export function FlowRunDialog({
   );
 }
 
-function TuningPanel({
-  groups,
-  items,
-  inputValues,
-  pickerValues,
-  extractValues,
-  valueOverrides,
-  onInputChange,
-  onPickerChange,
-  onExtractChange,
+interface RunSummary {
+  total: number;
+  done: number;
+  failed: number;
+  elapsedMs: number;
+  tunable: number;
+  currentStep: number;
+  currentLabel?: string;
+  percent: number;
+}
+
+function StepFilter({
+  filter,
+  tunableCount,
+  onChange,
 }: {
-  groups: TuningGroup[];
-  items: RunItem[];
-  inputValues: Record<string, string>;
-  pickerValues: Record<string, PickerDraft>;
-  extractValues: Record<string, ExtractEditor>;
-  valueOverrides: Record<string, unknown>;
-  onInputChange: (microNodeId: string, value: string) => void;
-  onPickerChange: (microNodeId: string, node: PickerNode, patch: Partial<PickerDraft>) => void;
-  onExtractChange: (microNodeId: string, node: ExtractNode, editor: ExtractEditor) => void;
+  filter: "all" | "tunable";
+  tunableCount: number;
+  onChange: (filter: "all" | "tunable") => void;
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <p className="px-4 py-2.5 text-[11px] leading-4 text-muted">
-        运行中可改尚未执行的字段；留空表示使用画布注入或录制值。执行中的记录也能改，但已执行的步骤不会被回写。
-      </p>
-
-      {groups.length === 0 ? (
-        <p className="px-4 pb-3 text-[11.5px] leading-5 text-muted">流程里还没有操作记录节点。</p>
-      ) : (
-        <Table className="table-fixed">
-          <TableHeader className="sticky top-0 z-10 bg-panel">
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-8 px-2">#</TableHead>
-              <TableHead className="w-[108px] px-2">节点</TableHead>
-              <TableHead className="w-[92px] px-2">可调项</TableHead>
-              <TableHead className="px-2">回放值</TableHead>
-              <TableHead className="w-8 px-1" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {groups.map((group) => {
-              const groupItems = items.filter((item) => item.groupId === group.macroId);
-              const running = groupItems.some((item) => item.status === "running");
-              const failed = groupItems.some((item) => item.status === "fail");
-              const finished =
-                groupItems.length > 0 &&
-                !running &&
-                groupItems.every(
-                  (item) =>
-                    item.status === "pass" ||
-                    item.status === "healed" ||
-                    item.status === "manual" ||
-                    item.status === "skipped",
-                );
-              const label = running
-                ? "执行中"
-                : failed
-                  ? "失败"
-                  : finished
-                    ? "已执行"
-                    : "未执行";
-              const variant = running
-                ? "accent"
-                : failed
-                  ? "destructive"
-                  : finished
-                    ? "moss"
-                    : "secondary";
-
-              return (
-                <Fragment key={group.macroId}>
-                  <TableRow className="bg-ink/[0.04] hover:bg-ink/[0.04]">
-                    <TableCell colSpan={5} className="px-2.5 py-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold">
-                          {group.recordName}
-                        </span>
-                        <Badge variant={variant}>{label}</Badge>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  {group.nodes.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={5}
-                        className="px-2.5 py-3 text-center text-[10.5px] text-muted"
-                      >
-                        没有可微调的字段
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    group.nodes.map((item, nodeIndex) =>
-                      item.node.type === "interact" ? (
-                        <InteractTuningRows
-                          key={item.microId}
-                          node={item.node}
-                          microId={item.microId}
-                          nodeIndex={nodeIndex}
-                          value={inputValues[item.microId]}
-                          disabled={finished}
-                          onChange={onInputChange}
-                        />
-                      ) : item.node.type === "picker" ? (
-                        <PickerTuningRows
-                          key={item.microId}
-                          node={item.node}
-                          microId={item.microId}
-                          nodeIndex={nodeIndex}
-                          draft={pickerValues[item.microId] ?? defaultPickerDraft(item.node)}
-                          disabled={finished}
-                          onChange={onPickerChange}
-                        />
-                      ) : (
-                        <ExtractTuningRows
-                          key={item.microId}
-                          node={item.node}
-                          microId={item.microId}
-                          nodeIndex={nodeIndex}
-                          editor={
-                            extractValues[item.microId] ??
-                            extractEditorOf(item.node, valueOverrides[item.microId])
-                          }
-                          disabled={finished}
-                          onChange={onExtractChange}
-                        />
-                      ),
-                    )
-                  )}
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
-      )}
+    <div className="inline-flex rounded-lg bg-paper p-0.5">
+      <button
+        type="button"
+        className={cn(
+          "rounded-md px-2 py-1 text-[10.5px] font-medium transition-colors",
+          filter === "all" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink",
+        )}
+        onClick={() => onChange("all")}
+      >
+        全部
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "flex items-center gap-1 rounded-md px-2 py-1 text-[10.5px] font-medium transition-colors",
+          filter === "tunable" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink",
+        )}
+        onClick={() => onChange("tunable")}
+      >
+        <SlidersHorizontal className="size-3" />
+        可微调 {tunableCount}
+      </button>
     </div>
   );
 }
 
-interface TuningTableRow {
-  key: string;
-  option: ReactNode;
-  control: ReactNode;
-  reset: () => void;
+function RunStatusOverview({
+  phaseLabel,
+  phaseVariant,
+  statusText,
+  summary,
+  filter,
+  onFilterChange,
+}: {
+  phaseLabel: string;
+  phaseVariant: BadgeVariant;
+  statusText: string;
+  summary: RunSummary;
+  filter: "all" | "tunable";
+  onFilterChange: (filter: "all" | "tunable") => void;
+}) {
+  return (
+    <section className="shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
+          RUN STATUS
+        </span>
+        <StepFilter
+          filter={filter}
+          tunableCount={summary.tunable}
+          onChange={onFilterChange}
+        />
+      </div>
+
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-[34px] font-bold leading-none tracking-tight text-ink">
+            {String(summary.currentStep).padStart(2, "0")}
+          </span>
+          <span className="text-[12px] text-muted">/ {summary.total} 步</span>
+        </div>
+        <Badge variant={phaseVariant}>{phaseLabel}</Badge>
+      </div>
+
+      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[#e9e6de]">
+        <div
+          className="h-full rounded-full bg-running transition-[width] duration-300"
+          style={{ width: `${summary.percent}%` }}
+        />
+      </div>
+
+      <div className="mt-2.5 flex items-center justify-between gap-2 text-[11px]">
+        <span className="min-w-0 truncate text-muted">
+          {summary.currentLabel ? `当前节点 · ${summary.currentLabel}` : statusText}
+        </span>
+        <span className="shrink-0 font-mono text-ink">{formatDuration(summary.elapsedMs)}</span>
+      </div>
+      {summary.currentLabel ? (
+        <p className="mt-1 break-words text-[10.5px] leading-4 text-muted">{statusText}</p>
+      ) : null}
+    </section>
+  );
 }
 
-function InteractTuningRows({
+function RunMetrics({ summary, dirtyCount }: { summary: RunSummary; dirtyCount: number }) {
+  const metrics = [
+    {
+      label: "已完成",
+      value: summary.done,
+      hint: "节点",
+      tone: "text-moss",
+    },
+    {
+      label: "失败",
+      value: summary.failed,
+      hint: summary.failed > 0 ? "需介入" : "无需介入",
+      tone: summary.failed > 0 ? "text-danger" : "text-muted",
+    },
+    {
+      label: "可微调",
+      value: dirtyCount > 0 ? dirtyCount : summary.tunable,
+      hint: dirtyCount > 0 ? "处已调" : "处待改值",
+      tone: "text-amber",
+    },
+  ];
+  return (
+    <div className="grid shrink-0 grid-cols-[1.85fr_1fr_1fr] gap-2.5">
+      {metrics.map((metric) => (
+        <div
+          key={metric.label}
+          className="rounded-xl bg-white p-3 shadow-[0_4px_16px_rgba(27,28,29,0.05)]"
+        >
+          <div className="text-[10.5px] text-muted">{metric.label}</div>
+          <div
+            className={cn(
+              "mt-1 text-[26px] font-bold leading-none tabular-nums",
+              metric.tone,
+            )}
+          >
+            {String(metric.value).padStart(2, "0")}
+          </div>
+          <div className="mt-1.5 text-[10px] text-[#9a968c]">{metric.hint}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RunVarsCard({ vars }: { vars: Record<string, unknown> }) {
+  const entries = Object.entries(vars);
+  if (entries.length === 0) return null;
+  return (
+    <section className="shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
+      <div className="font-mono text-[10px] font-semibold tracking-[0.1em] text-muted">
+        ENV · 运行变量
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        {entries.map(([name, value]) => (
+          <span key={name} className="rounded-lg bg-paper px-2.5 py-1.5 text-[10.5px] text-ink">
+            <span className="font-mono text-muted">{name}</span>
+            <span className="mx-1.5 text-[#c9c4b8]">|</span>
+            {String(value)}
+          </span>
+        ))}
+      </div>
+      <p className="mt-2.5 text-[10.5px] leading-4 text-muted">
+        取值节点产出的变量会注入下一条记录的筛选值。
+      </p>
+    </section>
+  );
+}
+
+interface RunStepsPanelProps {
+  steps: RunStep[];
+  itemMap: Map<string, RunItem>;
+  activeMicroId?: string;
+  dirtyIds: ReadonlySet<string>;
+  inputValues: Record<string, string>;
+  pickerValues: Record<string, PickerDraft>;
+  extractValues: Record<string, ExtractEditor>;
+  valueOverrides: Record<string, unknown>;
+  injectionLabels: Map<string, string>;
+  filter: "all" | "tunable";
+  onInputChange: (microNodeId: string, value: string) => void;
+  onPickerChange: (
+    microNodeId: string,
+    node: PickerNode,
+    patch: Partial<PickerDraft>,
+  ) => void;
+  onPickerReset: (microNodeId: string) => void;
+  onExtractChange: (
+    microNodeId: string,
+    node: ExtractNode,
+    editor: ExtractEditor,
+  ) => void;
+  registerRef: (microNodeId: string, element: HTMLLIElement | null) => void;
+}
+
+function RunStepsPanel({
+  steps,
+  itemMap,
+  activeMicroId,
+  dirtyIds,
+  inputValues,
+  pickerValues,
+  extractValues,
+  valueOverrides,
+  injectionLabels,
+  filter,
+  onInputChange,
+  onPickerChange,
+  onPickerReset,
+  onExtractChange,
+  registerRef,
+}: RunStepsPanelProps) {
+  const visibleSteps = filter === "tunable" ? steps.filter((step) => step.tunable) : steps;
+  const groups: Array<{
+    key: string;
+    groupId?: string;
+    label: string;
+    steps: RunStep[];
+  }> = [];
+  for (const step of visibleSteps) {
+    const last = groups[groups.length - 1];
+    if (last && last.groupId === step.groupId) last.steps.push(step);
+    else
+      groups.push({
+        key: `${step.groupId ?? "solo"}-${groups.length}`,
+        groupId: step.groupId,
+        label: step.groupLabel,
+        steps: [step],
+      });
+  }
+  const groupTotals = new Map<string, RunStep[]>();
+  for (const step of steps) {
+    const key = step.groupId ?? "__none__";
+    const list = groupTotals.get(key) ?? [];
+    list.push(step);
+    groupTotals.set(key, list);
+  }
+
+  return (
+    <section className="shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-[13px] font-semibold">节点步骤</h3>
+        <span className="text-[10.5px] text-muted">按执行顺序 · 同组共享容器</span>
+      </div>
+
+      {visibleSteps.length === 0 ? (
+        <p className="py-6 text-center text-[11.5px] leading-5 text-muted">
+          {steps.length === 0 ? "画布没有可执行的节点。" : "没有可微调的节点。"}
+        </p>
+      ) : (
+        <div className="mt-3 grid gap-3">
+          {groups.map((group) => (
+            <div key={group.key}>
+              <RunGroupHeader
+                label={group.label}
+                steps={groupTotals.get(group.groupId ?? "__none__") ?? group.steps}
+                itemMap={itemMap}
+              />
+              <ol className="mt-2 grid gap-1.5">
+                {group.steps.map((step) => (
+                  <RunStepCard
+                    key={step.microId}
+                    step={step}
+                    item={itemMap.get(step.microId)}
+                    active={step.microId === activeMicroId}
+                    dirty={dirtyIds.has(step.microId)}
+                    inputValues={inputValues}
+                    pickerValues={pickerValues}
+                    extractValues={extractValues}
+                    valueOverrides={valueOverrides}
+                    injectionLabels={injectionLabels}
+                    onInputChange={onInputChange}
+                    onPickerChange={onPickerChange}
+                    onPickerReset={onPickerReset}
+                    onExtractChange={onExtractChange}
+                    registerRef={registerRef}
+                  />
+                ))}
+              </ol>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RunGroupHeader({
+  label,
+  steps,
+  itemMap,
+}: {
+  label: string;
+  steps: RunStep[];
+  itemMap: Map<string, RunItem>;
+}) {
+  const statuses = steps.map((step) => itemMap.get(step.microId)?.status);
+  const running = statuses.some((status) => status === "running");
+  const failed = statuses.some((status) => status === "fail");
+  const done = statuses.filter(
+    (status) => status !== undefined && status !== "running",
+  ).length;
+  const total = steps.length;
+  const tone = failed
+    ? "text-danger"
+    : running
+      ? "text-running"
+      : total > 0 && done === total
+        ? "text-moss"
+        : "text-muted";
+  const text = running
+    ? "执行中"
+    : failed
+      ? "有失败"
+      : total > 0 && done === total
+        ? "已执行"
+        : `${done} / ${total} 完成`;
+  return (
+    <div className="flex items-center justify-between gap-2 px-0.5">
+      <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold text-muted">
+        {label}
+      </span>
+      <span className={cn("shrink-0 font-mono text-[10px]", tone)}>{text}</span>
+    </div>
+  );
+}
+
+function RunStepCard({
+  step,
+  item,
+  active,
+  dirty,
+  inputValues,
+  pickerValues,
+  extractValues,
+  valueOverrides,
+  injectionLabels,
+  onInputChange,
+  onPickerChange,
+  onPickerReset,
+  onExtractChange,
+  registerRef,
+}: {
+  step: RunStep;
+  item?: RunItem;
+  active: boolean;
+  dirty: boolean;
+  inputValues: Record<string, string>;
+  pickerValues: Record<string, PickerDraft>;
+  extractValues: Record<string, ExtractEditor>;
+  valueOverrides: Record<string, unknown>;
+  injectionLabels: Map<string, string>;
+  onInputChange: (microNodeId: string, value: string) => void;
+  onPickerChange: (
+    microNodeId: string,
+    node: PickerNode,
+    patch: Partial<PickerDraft>,
+  ) => void;
+  onPickerReset: (microNodeId: string) => void;
+  onExtractChange: (
+    microNodeId: string,
+    node: ExtractNode,
+    editor: ExtractEditor,
+  ) => void;
+  registerRef: (microNodeId: string, element: HTMLLIElement | null) => void;
+}) {
+  const status: StepStatus = item?.status ?? "pending";
+  // 失败行保持可编辑，方便调完值后重试；已执行/执行中的行不再允许修改。
+  const disabled =
+    status === "running" ||
+    status === "pass" ||
+    status === "healed" ||
+    status === "manual" ||
+    status === "skipped";
+  const { node, microId } = step;
+  const interactNode =
+    node.type === "interact" && EDITABLE_INTERACT.has(node.adapter) ? node : null;
+  const pickerNode = node.type === "picker" ? node : null;
+  const extractNode = node.type === "extract" ? node : null;
+
+  const tone = STEP_TONE[status];
+
+  return (
+    <li
+      ref={(element) => registerRef(microId, element)}
+      className={cn(
+        "rounded-lg border border-line px-2.5 py-2 transition-colors",
+        tone.row,
+        active && "ring-1 ring-running/25",
+        status === "skipped" && "opacity-70",
+      )}
+    >
+      <div className="flex items-start gap-1.5">
+        <span
+          aria-hidden
+          className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", tone.dot)}
+        />
+        <span className="mt-0.5 w-5 shrink-0 font-mono text-[9.5px] text-muted">
+          {String(step.index).padStart(2, "0")}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium">
+              {stepLabel(node)}
+              <span className="ml-1.5 font-normal text-muted">· {stepKind(node)}</span>
+            </span>
+            {dirty ? <Badge variant="amber">已调</Badge> : null}
+            <span className={cn("shrink-0 text-[10px] font-medium", tone.text)}>
+              {STEP_BADGE[status].label}
+            </span>
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+            {node.enabled === false ? <Badge variant="amber">已禁用</Badge> : null}
+            {item?.durationMs !== undefined ? (
+              <span className="font-mono text-[9.5px] text-muted">{item.durationMs}ms</span>
+            ) : null}
+          </div>
+          {item ? (
+            <p className="mt-1 break-words text-[10.5px] leading-4 text-muted">
+              {item.message}
+            </p>
+          ) : null}
+
+          {interactNode ? (
+            <InteractTuning
+              node={interactNode}
+              microId={microId}
+              value={inputValues[microId]}
+              baseline={interactBaseline(interactNode, valueOverrides[microId])}
+              injection={injectionLabels.get(`${microId}|input`)}
+              disabled={disabled}
+              onChange={onInputChange}
+            />
+          ) : pickerNode ? (
+            <PickerTuning
+              node={pickerNode}
+              microId={microId}
+              draft={pickerValues[microId] ?? pickerBaseline(pickerNode, valueOverrides[microId])}
+              baseline={pickerBaseline(pickerNode, valueOverrides[microId])}
+              injectionOf={(index) => injectionLabels.get(`${microId}|filter|${index}`)}
+              disabled={disabled}
+              onChange={onPickerChange}
+              onReset={onPickerReset}
+            />
+          ) : extractNode ? (
+            <ExtractTuningConfig
+              node={extractNode}
+              microId={microId}
+              editor={
+                extractValues[microId] ??
+                extractEditorOf(extractNode, valueOverrides[microId])
+              }
+              baseline={extractEditorOf(extractNode, valueOverrides[microId])}
+              dirty={dirty}
+              disabled={disabled}
+              onChange={onExtractChange}
+            />
+          ) : null}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function TuningField({
+  label,
+  title,
+  children,
+}: {
+  label: string;
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span
+        className="w-16 shrink-0 truncate text-[10px] text-muted"
+        title={title ?? label}
+      >
+        {label}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+function InteractTuning({
   node,
   microId,
-  nodeIndex,
   value,
+  baseline,
+  injection,
   disabled,
   onChange,
 }: {
   node: InteractNode;
   microId: string;
-  nodeIndex: number;
   value?: string;
+  baseline: string;
+  injection?: string;
   disabled: boolean;
   onChange: (microNodeId: string, value: string) => void;
 }) {
-  const label = node.target.label ?? node.name ?? node.id;
   const isCheck = node.adapter === "check";
-  const fallback = interactDefaultText(node) === "true" ? "勾选" : "取消";
+  const overridden = value !== undefined;
+  const baselineText = isCheck ? (baseline === "true" ? "勾选" : "取消") : baseline;
 
   return (
-    <TableRow>
-      <TableCell className="px-2 py-1.5 font-mono text-[9.5px] text-muted">
-        {String(nodeIndex + 1).padStart(2, "0")}
-      </TableCell>
-      <TableCell className="px-2 py-1.5">
-        <div className="truncate text-[11px] font-medium">{label}</div>
-        <Badge variant="secondary" className="mt-0.5">
-          {isCheck ? "勾选" : node.adapter}
-        </Badge>
-      </TableCell>
-      <TableCell className="px-2 py-1.5 text-[10px] leading-4 text-muted">
-        {isCheck ? "勾选状态" : "输入值"}
-      </TableCell>
-      <TableCell className="px-2 py-1.5">
+    <div className="mt-1.5 grid gap-1 border-t border-line pt-1.5">
+      <div className="flex items-center gap-1.5">
+        <span className="w-16 shrink-0 text-[10px] text-muted">
+          {isCheck ? "勾选状态" : "回放值"}
+        </span>
         {isCheck ? (
           <Select
-            value={value ? value : FOLLOW_CANVAS}
+            value={value ?? FOLLOW_CANVAS}
             disabled={disabled}
             onValueChange={(next) =>
               onChange(microId, next === FOLLOW_CANVAS ? "" : next)
             }
           >
-            <SelectTrigger size="xs">
+            <SelectTrigger size="xs" className="min-w-0 flex-1">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={FOLLOW_CANVAS}>跟随画布（{fallback}）</SelectItem>
+              <SelectItem value={FOLLOW_CANVAS}>跟随默认（{baselineText}）</SelectItem>
               <SelectItem value="true">回放时勾选</SelectItem>
               <SelectItem value="false">回放时取消</SelectItem>
             </SelectContent>
           </Select>
         ) : (
           <Input
-            className="h-7 text-[11.5px]"
-            value={value ?? interactDefaultText(node)}
-            placeholder={valueHint(node.value)}
+            className="h-7 min-w-0 flex-1 text-[11.5px]"
+            value={value ?? ""}
+            placeholder="留空 = 使用默认值"
             disabled={disabled}
             onChange={(event) => onChange(microId, event.target.value)}
           />
         )}
-      </TableCell>
-      <TableCell className="px-1 py-1.5">
-        <Button
-          size="sm"
-          variant="ghost"
-          title="恢复录制值"
-          aria-label="恢复录制值"
-          disabled={disabled}
-          onClick={() => onChange(microId, "")}
+        {overridden ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 shrink-0 px-1.5"
+            title="恢复默认值"
+            aria-label="恢复默认值"
+            disabled={disabled}
+            onClick={() => onChange(microId, "")}
+          >
+            <RotateCcw className="size-3.5" />
+          </Button>
+        ) : null}
+      </div>
+      {injection ? (
+        <p
+          className={cn(
+            "text-[10px] leading-4",
+            overridden ? "text-amber" : "text-accent",
+          )}
         >
-          <RotateCcw className="size-3.5" />
-          恢复
-        </Button>
-      </TableCell>
-    </TableRow>
+          画布注入：{injection}
+          {overridden ? " · 当前被微调覆盖" : ""}
+        </p>
+      ) : null}
+      <p className="truncate text-[10px] leading-4 text-muted" title={baselineText || "空"}>
+        默认：{baselineText === "" ? "空" : baselineText}
+      </p>
+    </div>
   );
 }
 
-function ExtractTuningRows({
+function ExtractTuningConfig({
   node,
   microId,
-  nodeIndex,
   editor,
+  baseline,
+  dirty,
   disabled,
   onChange,
 }: {
   node: ExtractNode;
   microId: string;
-  nodeIndex: number;
   editor: ExtractEditor;
+  baseline: ExtractEditor;
+  dirty: boolean;
   disabled: boolean;
-  onChange: (microNodeId: string, node: ExtractNode, editor: ExtractEditor) => void;
+  onChange: (
+    microNodeId: string,
+    node: ExtractNode,
+    editor: ExtractEditor,
+  ) => void;
 }) {
-  const label =
-    node.source === "response" || node.source === "js" || node.source === "const"
-      ? (node.name ?? node.varName ?? node.id)
-      : (node.target.label ?? node.name ?? node.varName ?? node.id);
   const sourceLabel =
     editor.source === "response"
       ? "接口"
@@ -1164,68 +1697,64 @@ function ExtractTuningRows({
         ? "JS"
         : editor.source === "const"
           ? "手动"
-          : "DOM";
-
+          : editor.locate === "cell"
+            ? "表格"
+            : "DOM";
   return (
-    <TableRow>
-      <TableCell className="px-2 py-1.5 font-mono text-[9.5px] text-muted">
-        {String(nodeIndex + 1).padStart(2, "0")}
-      </TableCell>
-      <TableCell className="px-2 py-1.5">
-        <div className="truncate text-[11px] font-medium">{label}</div>
-        <div className="mt-0.5 flex flex-wrap gap-1">
-          <Badge variant="secondary">取值</Badge>
-          <Badge variant="outline">{sourceLabel}</Badge>
-        </div>
-        <div className="mt-0.5 truncate font-mono text-[9.5px] text-muted">
-          {node.varName || "未命名"}
-        </div>
-      </TableCell>
-      <TableCell className="px-2 py-1.5 text-[10px] leading-4 text-muted">
-        取值配置
-      </TableCell>
-      <TableCell className="px-2 py-1.5">
-        <fieldset disabled={disabled} className="min-w-0">
-          <ExtractTuningFields
-            editor={editor}
-            onChange={(next) => onChange(microId, node, next)}
-          />
-        </fieldset>
-      </TableCell>
-      <TableCell className="px-1 py-1.5">
-        <Button
-          size="sm"
-          variant="ghost"
-          title="恢复录制值"
-          aria-label="恢复取值配置"
-          disabled={disabled}
-          onClick={() => onChange(microId, node, recordedExtractEditor(node))}
-        >
-          <RotateCcw className="size-3.5" />
-          恢复
-        </Button>
-      </TableCell>
-    </TableRow>
+    <div className="mt-1.5 grid gap-1 border-t border-line pt-1.5">
+      <div className="flex items-center justify-between gap-1.5">
+        <span className="min-w-0 flex-1 truncate font-mono text-[9.5px] text-muted">
+          ENV {node.varName || "未命名"} · {sourceLabel}
+        </span>
+        {dirty ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 shrink-0 px-1.5 text-[10px]"
+            title="恢复默认值"
+            aria-label="恢复默认值"
+            disabled={disabled}
+            onClick={() => onChange(microId, node, baseline)}
+          >
+            <RotateCcw className="size-3" />
+            恢复默认
+          </Button>
+        ) : null}
+      </div>
+      <fieldset disabled={disabled} className="min-w-0">
+        <ExtractTuningFields
+          editor={editor}
+          onChange={(next) => onChange(microId, node, next)}
+        />
+      </fieldset>
+    </div>
   );
 }
 
-function PickerTuningRows({
+function PickerTuning({
   node,
   microId,
-  nodeIndex,
   draft,
+  baseline,
+  injectionOf,
   disabled,
   onChange,
+  onReset,
 }: {
   node: PickerNode;
   microId: string;
-  nodeIndex: number;
   draft: PickerDraft;
+  baseline: PickerDraft;
+  injectionOf: (index: number) => string | undefined;
   disabled: boolean;
-  onChange: (microNodeId: string, node: PickerNode, patch: Partial<PickerDraft>) => void;
+  onChange: (
+    microNodeId: string,
+    node: PickerNode,
+    patch: Partial<PickerDraft>,
+  ) => void;
+  onReset: (microNodeId: string) => void;
 }) {
-  const label = node.trigger.label ?? node.name ?? node.id;
-  const defaultDraft = defaultPickerDraft(node);
+  const dirty = !pickerDraftEquals(draft, baseline);
   const filterSteps = (node.filter?.steps ?? [])
     .map((step, index) => ({ step, index }))
     .filter(({ step }) => step.adapter === "input" || step.adapter === "nativeSelect");
@@ -1234,221 +1763,173 @@ function PickerTuningRows({
     const next: Partial<PickerDraft> = { strategy };
     if (strategy === "byIndex" && draft.indexes.length === 0) {
       next.indexes =
-        defaultDraft.strategy === "byIndex"
-          ? defaultDraft.indexes
+        baseline.strategy === "byIndex"
+          ? baseline.indexes
           : draft.picks.length > 0
             ? draft.picks.map((_, index) => String(index + 1))
             : ["1"];
     }
     if ((strategy === "byText" || strategy === "byRow") && draft.picks.length === 0) {
-      next.picks = defaultDraft.strategy === strategy ? defaultDraft.picks : [""];
+      next.picks = baseline.strategy === strategy ? baseline.picks : [""];
     }
     patch(next);
   };
 
-  const rows: TuningTableRow[] = [];
-  rows.push({
-    key: "strategy",
-    option: "定位方式",
-    control: (
-      <Select
-        value={draft.strategy}
-        disabled={disabled}
-        onValueChange={(next) => changeStrategy(next as PickerStrategy)}
-      >
-        <SelectTrigger size="xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {(Object.keys(PICKER_STRATEGY_LABEL) as PickerStrategy[]).map((strategy) => (
-            <SelectItem key={strategy} value={strategy}>
-              {PICKER_STRATEGY_LABEL[strategy]}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    ),
-    reset: () =>
-      patch({
-        strategy: defaultDraft.strategy,
-        indexes: defaultDraft.indexes,
-        picks: defaultDraft.picks,
-        on: defaultDraft.on,
-      }),
-  });
-
-  for (const { step, index } of filterSteps) {
-    rows.push({
-      key: `filter-${index}`,
-      option: (
-        <span className="block truncate">
-          筛选值 <span className="text-muted/70">{step.target.label ?? step.adapter}</span>
-        </span>
-      ),
-      control: (
-        <Input
-          className="h-7 text-[11.5px]"
-          value={draft.filters[index] ?? ""}
-          placeholder={valueHint(step.value)}
-          disabled={disabled}
-          onChange={(event) => {
-            const filters = [...draft.filters];
-            while (filters.length <= index) filters.push("");
-            filters[index] = event.target.value;
-            patch({ filters });
-          }}
-        />
-      ),
-      reset: () => {
-        const filters = [...draft.filters];
-        while (filters.length <= index) filters.push("");
-        filters[index] = defaultDraft.filters[index] ?? "";
-        patch({ filters });
-      },
-    });
-  }
-
-  if (draft.strategy === "byIndex") {
-    draft.indexes.forEach((indexValue, index) => {
-      rows.push({
-        key: `index-${index}`,
-        option: `位置 ${index + 1}`,
-        control: (
-          <Input
-            type="number"
-            min={1}
-            step={1}
-            className="h-7 text-[11.5px]"
-            value={indexValue}
-            disabled={disabled}
-            onChange={(event) => {
-              const indexes = [...draft.indexes];
-              indexes[index] = event.target.value;
-              patch({ indexes });
-            }}
-          />
-        ),
-        reset: () => {
-          const indexes = [...draft.indexes];
-          indexes[index] = defaultDraft.indexes[index] ?? "1";
-          patch({ indexes });
-        },
-      });
-    });
-    rows.push({
-      key: "on",
-      option: "点击目标",
-      control: (
-        <Select
-          value={draft.on}
-          disabled={disabled}
-          onValueChange={(next) => patch({ on: next as "item" | "row" })}
-        >
-          <SelectTrigger size="xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="item">选项本身</SelectItem>
-            <SelectItem value="row">表格行</SelectItem>
-          </SelectContent>
-        </Select>
-      ),
-      reset: () => patch({ on: defaultDraft.on }),
-    });
-  } else if (draft.strategy === "firstVisible") {
-    rows.push({
-      key: "first",
-      option: "选择结果",
-      control: <span className="text-[10px] text-moss">自动选第一条可见结果</span>,
-      reset: () => undefined,
-    });
-    rows.push({
-      key: "on",
-      option: "点击目标",
-      control: (
-        <Select
-          value={draft.on}
-          disabled={disabled}
-          onValueChange={(next) => patch({ on: next as "item" | "row" })}
-        >
-          <SelectTrigger size="xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="item">选项本身</SelectItem>
-            <SelectItem value="row">表格行</SelectItem>
-          </SelectContent>
-        </Select>
-      ),
-      reset: () => patch({ on: defaultDraft.on }),
-    });
-  } else {
-    draft.picks.forEach((pick, index) => {
-      rows.push({
-        key: `pick-${index}`,
-        option: `选择项 ${index + 1}`,
-        control: (
-          <Input
-            className="h-7 text-[11.5px]"
-            value={pick}
-            placeholder={pickHint(node, index)}
-            disabled={disabled}
-            onChange={(event) => {
-              const picks = [...draft.picks];
-              picks[index] = event.target.value;
-              patch({ picks });
-            }}
-          />
-        ),
-        reset: () => {
-          const picks = [...draft.picks];
-          picks[index] = defaultDraft.picks[index] ?? "";
-          patch({ picks });
-        },
-      });
-    });
-  }
-
   return (
-    <>
-      {rows.map((row, index) => (
-        <TableRow key={row.key}>
-          {index === 0 ? (
-            <>
-              <TableCell
-                rowSpan={rows.length}
-                className="px-2 py-1.5 align-top font-mono text-[9.5px] text-muted"
-              >
-                {String(nodeIndex + 1).padStart(2, "0")}
-              </TableCell>
-              <TableCell rowSpan={rows.length} className="px-2 py-1.5 align-top">
-                <div className="truncate text-[11px] font-medium">{label}</div>
-                <Badge variant="secondary" className="mt-0.5">
-                  选择器
-                </Badge>
-              </TableCell>
-            </>
-          ) : null}
-          <TableCell className="px-2 py-1.5 text-[10px] leading-4 text-muted">
-            {row.option}
-          </TableCell>
-          <TableCell className="px-2 py-1.5">{row.control}</TableCell>
-          <TableCell className="px-1 py-1.5">
-            <Button
-              size="sm"
-              variant="ghost"
-              title="恢复录制值"
-              aria-label="恢复录制值"
-              disabled={disabled || row.key === "first"}
-              onClick={row.reset}
+    <div className="mt-1.5 grid gap-1 border-t border-line pt-1.5">
+      <TuningField label="定位方式">
+        <Select
+          value={draft.strategy}
+          disabled={disabled}
+          onValueChange={(next) => changeStrategy(next as PickerStrategy)}
+        >
+          <SelectTrigger size="xs" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(PICKER_STRATEGY_LABEL) as PickerStrategy[]).map((strategy) => (
+              <SelectItem key={strategy} value={strategy}>
+                {PICKER_STRATEGY_LABEL[strategy]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </TuningField>
+
+      {filterSteps.map(({ step, index }) => {
+        const injection = injectionOf(index);
+        const value = draft.filters[index] ?? "";
+        return (
+          <div key={`filter-${index}`} className="grid gap-0.5">
+            <TuningField
+              label="筛选值"
+              title={`${step.target.label ?? step.adapter} · 默认：${literalText(step.value) || "空"}`}
             >
-              <RotateCcw className="size-3.5" />
-              恢复
-            </Button>
-          </TableCell>
-        </TableRow>
-      ))}
-    </>
+              <Input
+                className="h-7 text-[11.5px]"
+                value={value}
+                placeholder="留空 = 使用默认值"
+                disabled={disabled}
+                onChange={(event) => {
+                  const filters = [...draft.filters];
+                  while (filters.length <= index) filters.push("");
+                  filters[index] = event.target.value;
+                  patch({ filters });
+                }}
+              />
+            </TuningField>
+            <p className="pl-[68px] text-[9.5px] leading-4 text-muted">
+              字段：{step.target.label ?? step.adapter} · 默认：{literalText(step.value) || "空"}
+            </p>
+            {injection ? (
+              <p
+                className={cn(
+                  "pl-[68px] text-[9.5px] leading-4",
+                  value ? "text-amber" : "text-accent",
+                )}
+              >
+                画布注入：{injection}
+                {value ? " · 当前被微调覆盖" : ""}
+              </p>
+            ) : null}
+          </div>
+        );
+      })}
+
+      {draft.strategy === "byIndex" ? (
+        <>
+          {draft.indexes.map((indexValue, index) => (
+            <TuningField key={`index-${index}`} label={`位置 ${index + 1}`}>
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                className="h-7 text-[11.5px]"
+                value={indexValue}
+                disabled={disabled}
+                onChange={(event) => {
+                  const indexes = [...draft.indexes];
+                  indexes[index] = event.target.value;
+                  patch({ indexes });
+                }}
+              />
+            </TuningField>
+          ))}
+          <TuningField label="点击目标">
+            <Select
+              value={draft.on}
+              disabled={disabled}
+              onValueChange={(next) => patch({ on: next as "item" | "row" })}
+            >
+              <SelectTrigger size="xs" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="item">选项本身</SelectItem>
+                <SelectItem value="row">表格行</SelectItem>
+              </SelectContent>
+            </Select>
+          </TuningField>
+        </>
+      ) : draft.strategy === "firstVisible" ? (
+        <>
+          <TuningField label="选择结果">
+            <span className="text-[10px] text-moss">自动选第一条可见结果</span>
+          </TuningField>
+          <TuningField label="点击目标">
+            <Select
+              value={draft.on}
+              disabled={disabled}
+              onValueChange={(next) => patch({ on: next as "item" | "row" })}
+            >
+              <SelectTrigger size="xs" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="item">选项本身</SelectItem>
+                <SelectItem value="row">表格行</SelectItem>
+              </SelectContent>
+            </Select>
+          </TuningField>
+        </>
+      ) : (
+        draft.picks.map((pick, index) => (
+          <TuningField key={`pick-${index}`} label={`选项 ${index + 1}`}>
+            <Input
+              className="h-7 text-[11.5px]"
+              value={pick}
+              placeholder={pickHint(node, index)}
+              disabled={disabled}
+              onChange={(event) => {
+                const picks = [...draft.picks];
+                picks[index] = event.target.value;
+                patch({ picks });
+              }}
+            />
+          </TuningField>
+        ))
+      )}
+
+      <div className="mt-0.5 flex items-center justify-between">
+        <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-muted">
+          {node.pick.multi ? "多选" : "单选"} · {PICKER_STRATEGY_LABEL[draft.strategy]}
+        </span>
+        {dirty ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 shrink-0 px-1.5 text-[10px]"
+            title="恢复默认值"
+            aria-label="恢复默认值"
+            disabled={disabled}
+            onClick={() => onReset(microId)}
+          >
+            <RotateCcw className="size-3" />
+            恢复默认
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

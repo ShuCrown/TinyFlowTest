@@ -14,6 +14,9 @@
   --color-amber: #8a5a00;
   --color-amber-soft: #f7ecd2;
   --color-danger: #9f2d1b;
+  /* 执行中：与失败红拉开色相，避免把「进行中」误读成「出错」 */
+  --color-running: #3a6b8a;
+  --color-running-soft: #e7f0f5;
 
   --font-body: "Inter", "Noto Sans SC", "PingFang SC", system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;

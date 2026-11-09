@@ -12,6 +12,7 @@ const badgeVariants = cva(
         default: "border-line bg-white text-ink hover:bg-white",
         secondary: "border-line bg-ink/[0.03] text-muted",
         accent: "border-accent/20 bg-accent-soft text-accent",
+        running: "border-running/20 bg-running-soft text-running",
         moss: "border-moss/20 bg-moss-soft text-moss",
         amber: "border-amber/20 bg-amber-soft text-amber",
         destructive: "border-danger/20 bg-[#fdf3f0] text-danger",
