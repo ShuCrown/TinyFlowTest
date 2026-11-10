@@ -70,7 +70,7 @@ export function EmptyState({
 }) {
   return (
     <Card className="items-center border-dashed bg-panel/60 px-6 py-12 text-center shadow-none">
-      <div className="grid h-11 w-11 place-items-center rounded-[12px] border border-line bg-white font-mono text-[11px] font-semibold tracking-[0.14em] text-accent">
+      <div className="grid h-11 w-11 place-items-center rounded-[12px] border border-accent/20 bg-accent-soft font-mono text-[11px] font-semibold tracking-[0.14em] text-accent">
         {code}
       </div>
       <h2 className="mt-4 text-[15px] font-semibold tracking-tight">{title}</h2>

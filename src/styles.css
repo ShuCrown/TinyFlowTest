@@ -2,22 +2,22 @@
 @import "tw-animate-css";
 
 @theme {
-  --color-paper: #f2f0e9;
-  --color-panel: #fbfaf7;
-  --color-ink: #1b1c1d;
-  --color-muted: #6f6c63;
-  --color-line: rgba(27, 28, 29, 0.13);
-  --color-accent: #1b365d;
-  --color-accent-soft: #e7ebf2;
-  --color-moss: #2d6a4f;
-  --color-moss-soft: #e2efe7;
-  --color-amber: #8a5a00;
-  --color-amber-soft: #f7ecd2;
-  --color-danger: #9f2d1b;
-  --color-danger-soft: #fdf3f0;
+  --color-paper: #f4f6f9;
+  --color-panel: #ffffff;
+  --color-ink: #0f172a;
+  --color-muted: #64748b;
+  --color-line: #e2e8f0;
+  --color-accent: #2563eb;
+  --color-accent-soft: #eff6ff;
+  --color-moss: #059669;
+  --color-moss-soft: #ecfdf5;
+  --color-amber: #d97706;
+  --color-amber-soft: #fffbeb;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fef2f2;
   /* 执行中：与失败红拉开色相，避免把「进行中」误读成「出错」 */
-  --color-running: #3a6b8a;
-  --color-running-soft: #e7f0f5;
+  --color-running: #0284c7;
+  --color-running-soft: #f0f9ff;
 
   --font-body: "Inter", "Noto Sans SC", "PingFang SC", system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -42,8 +42,8 @@ body {
   color: var(--color-ink);
   background-color: var(--color-paper);
   background-image:
-    radial-gradient(circle at 12% -8%, rgba(27, 54, 93, 0.08), transparent 35%),
-    radial-gradient(circle at 92% 4%, rgba(45, 106, 79, 0.06), transparent 30%);
+    radial-gradient(circle at 12% -8%, rgba(37, 99, 235, 0.07), transparent 35%),
+    radial-gradient(circle at 92% 4%, rgba(5, 150, 105, 0.05), transparent 30%);
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.55;
@@ -51,7 +51,8 @@ body {
 }
 
 ::selection {
-  background: rgba(27, 54, 93, 0.16);
+  background: rgba(37, 99, 235, 0.16);
+  color: var(--color-ink);
 }
 
 ::-webkit-scrollbar {
@@ -66,11 +67,11 @@ body {
 ::-webkit-scrollbar-thumb {
   border: 3px solid var(--color-paper);
   border-radius: 999px;
-  background: rgba(27, 28, 29, 0.22);
+  background: rgba(15, 23, 42, 0.18);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(27, 28, 29, 0.34);
+  background: rgba(15, 23, 42, 0.32);
 }
 
 @layer components {
@@ -93,7 +94,7 @@ body {
     overflow: hidden;
     border: 1px solid var(--color-line);
     border-radius: 9px;
-    box-shadow: 0 8px 24px rgba(27, 28, 29, 0.08);
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
   }
 
   .tf-flow .react-flow__controls-button {
@@ -104,6 +105,7 @@ body {
 
   .tf-flow .react-flow__controls-button:hover {
     background: var(--color-accent-soft);
+    color: var(--color-accent);
   }
 
   .tf-flow .react-flow__minimap {
@@ -111,6 +113,7 @@ body {
     border: 1px solid var(--color-line);
     border-radius: 10px;
     background: #fff;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
   }
 
   .tf-flow .react-flow__handle {

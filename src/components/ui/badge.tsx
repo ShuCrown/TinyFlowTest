@@ -5,17 +5,17 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex w-fit items-center justify-center gap-1 whitespace-nowrap rounded-full border px-2 py-[3px] font-mono text-[10.5px] leading-tight transition-colors [&>svg]:size-3 [&>svg]:shrink-0",
+  "inline-flex w-fit items-center justify-center gap-1 whitespace-nowrap rounded-full border px-2 py-[3px] font-mono text-[10.5px] font-medium leading-tight transition-colors [&>svg]:size-3 [&>svg]:shrink-0",
   {
     variants: {
       variant: {
         default: "border-line bg-white text-ink hover:bg-white",
-        secondary: "border-line bg-ink/[0.03] text-muted",
-        accent: "border-accent/20 bg-accent-soft text-accent",
-        running: "border-running/20 bg-running-soft text-running",
-        moss: "border-moss/20 bg-moss-soft text-moss",
-        amber: "border-amber/20 bg-amber-soft text-amber",
-        destructive: "border-danger/20 bg-danger-soft text-danger",
+        secondary: "border-line bg-ink/[0.04] text-muted",
+        accent: "border-accent/30 bg-accent-soft text-accent",
+        running: "border-running/30 bg-running-soft text-running",
+        moss: "border-moss/30 bg-moss-soft text-moss",
+        amber: "border-amber/30 bg-amber-soft text-amber",
+        destructive: "border-danger/30 bg-danger-soft text-danger",
         outline: "border-line bg-transparent text-muted",
       },
     },

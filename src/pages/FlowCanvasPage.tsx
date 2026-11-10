@@ -79,8 +79,8 @@ import {
 import type { ExtractProducer } from "@/flow/vars.ts";
 
 const EMPTY_GRAPH: FlowGraph = { nodes: [], edges: [], injections: [], vars: [] };
-const RECORD_COLOR = "#1b365d";
-const EXTRACT_COLOR = "#2d6a4f";
+const RECORD_COLOR = "#2563eb";
+const EXTRACT_COLOR = "#059669";
 
 type SlotsMode = "recorded" | "literal" | "var";
 
@@ -490,8 +490,8 @@ export function FlowCanvasPage() {
         source: edge.from,
         target: edge.to,
         type: "flowEdge",
-        markerEnd: { type: MarkerType.ArrowClosed, color: "#1b365d", width: 17, height: 17 },
-        style: { stroke: "rgba(27,54,93,0.5)", strokeWidth: 1.5 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#2563eb", width: 17, height: 17 },
+        style: { stroke: "#2563eb", strokeWidth: 1.8 },
       })),
     [graph.edges],
   );
@@ -817,7 +817,7 @@ export function FlowCanvasPage() {
           {addOpen ? (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setAddOpen(false)} />
-              <div className="absolute left-0 top-full z-30 mt-1 w-[280px] rounded-xl border border-line bg-panel p-1.5 shadow-[0_18px_50px_rgba(27,28,29,0.18)]">
+              <div className="absolute left-0 top-full z-30 mt-1 w-[280px] rounded-xl border border-line bg-panel p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.14)]">
                 <button
                   type="button"
                   className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-accent-soft/40"
@@ -983,7 +983,7 @@ export function FlowCanvasPage() {
               defaultEdgeOptions={{ type: "smoothstep" }}
               proOptions={{ hideAttribution: true }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#c8c2b5" />
+              <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#cbd5e1" />
               <Controls position="bottom-left" showInteractive={false} />
               <MiniMap
                 position="bottom-right"
@@ -994,12 +994,12 @@ export function FlowCanvasPage() {
                   const data = node.data as FlowNodeData | undefined;
                   return data?.node.kind === "extract" ? EXTRACT_COLOR : RECORD_COLOR;
                 }}
-                maskColor="rgba(242,240,233,0.72)"
+                maskColor="rgba(244, 246, 249, 0.75)"
               />
               {graph.nodes.length === 0 ? (
                 <div className="pointer-events-none absolute inset-0 grid place-items-center px-8 text-center">
                   <div className="max-w-[420px]">
-                    <div className="mx-auto grid size-12 place-items-center rounded-xl border border-line bg-white text-accent">
+                    <div className="mx-auto grid size-12 place-items-center rounded-xl border border-accent/20 bg-accent-soft text-accent">
                       <Workflow className="size-5" />
                     </div>
                     <h2 className="mt-3 text-[15px] font-semibold">画布还是空的</h2>

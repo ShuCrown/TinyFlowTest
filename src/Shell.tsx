@@ -14,28 +14,30 @@ export function Shell() {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 flex h-screen w-[78px] shrink-0 flex-col border-r border-line bg-panel/80 backdrop-blur md:w-[86px]">
+      <aside className="sticky top-0 flex h-screen w-[78px] shrink-0 flex-col border-r border-line bg-panel/95 backdrop-blur md:w-[86px]">
         <div className="flex h-[72px] items-center justify-center border-b border-line">
-          <div className="grid h-10 w-10 place-items-center rounded-[11px] bg-ink text-[13px] font-bold tracking-[0.06em] text-panel">
+          <div className="grid h-10 w-10 place-items-center rounded-[12px] bg-gradient-to-br from-accent to-blue-700 text-[13px] font-bold tracking-[0.06em] text-white shadow-md shadow-accent/25">
             TF
           </div>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 py-4" aria-label="主导航">
+        <nav className="flex flex-1 flex-col gap-1.5 px-2 py-4" aria-label="主导航">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `group relative flex flex-col items-center gap-1 py-3 transition-colors ${
-                  isActive ? "text-accent" : "text-muted hover:text-ink"
+                `group relative flex flex-col items-center gap-1 rounded-xl py-2.5 transition-all ${
+                  isActive
+                    ? "bg-accent-soft font-semibold text-accent shadow-xs"
+                    : "text-muted hover:bg-paper hover:text-ink"
                 }`
               }
             >
               {({ isActive }) => (
                 <>
                   {isActive ? (
-                    <span className="absolute left-0 top-1/2 h-7 w-[2px] -translate-y-1/2 bg-accent" />
+                    <span className="absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r bg-accent" />
                   ) : null}
                   <span className="font-mono text-[10px] tracking-[0.18em]">{item.code}</span>
                   <span className="text-[11px]">{item.label}</span>
