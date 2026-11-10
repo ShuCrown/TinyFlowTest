@@ -4,6 +4,7 @@ import { Pencil, Plus, Save, Trash2, Workflow, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Dialog, EmptyState, Field, ItemCard, PageHeader } from "../components/ui";
 import { deleteFlow, formatTime, listFlows, newId, saveFlow } from "../lib/store";
 import type { FlowItem } from "../lib/types";
@@ -158,20 +159,26 @@ export function FlowsPage() {
             }
           >
             <div className="mx-auto flex max-w-[860px] flex-wrap items-center justify-center gap-2">
-              <div className="tf-node-chip border-l-[3px] border-l-accent">
-                <span>OP · 操作记录</span>
-                <strong>新建客户</strong>
-              </div>
+              <Card className="min-w-[132px] gap-1 border-l-[3px] border-l-accent p-2.5">
+                <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted">
+                  OP · 操作记录
+                </span>
+                <strong className="text-[12.5px] font-semibold">新建客户</strong>
+              </Card>
               <span className="font-mono text-[10px] text-muted">──▶</span>
-              <div className="tf-node-chip border-l-[3px] border-l-moss">
-                <span>CODE · 编号扣子</span>
-                <strong>customerCode</strong>
-              </div>
+              <Card className="min-w-[132px] gap-1 border-l-[3px] border-l-moss p-2.5">
+                <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted">
+                  CODE · 编号扣子
+                </span>
+                <strong className="text-[12.5px] font-semibold">customerCode</strong>
+              </Card>
               <span className="font-mono text-[10px] text-muted">──▶</span>
-              <div className="tf-node-chip border-l-[3px] border-l-accent">
-                <span>OP · 操作记录</span>
-                <strong>新建订单</strong>
-              </div>
+              <Card className="min-w-[132px] gap-1 border-l-[3px] border-l-accent p-2.5">
+                <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted">
+                  OP · 操作记录
+                </span>
+                <strong className="text-[12.5px] font-semibold">新建订单</strong>
+              </Card>
             </div>
             <p className="mt-3 font-mono text-[10px] tracking-[0.08em] text-muted">
               customerCode 通过虚线扣子注入下一步表单 / 筛选

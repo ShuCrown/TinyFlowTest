@@ -161,31 +161,6 @@ body {
     animation: tf-pop 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
-  .tf-node-chip {
-    display: flex;
-    min-width: 132px;
-    flex-direction: column;
-    gap: 3px;
-    border: 1px solid var(--color-line);
-    border-radius: 11px;
-    background: #fff;
-    padding: 9px 11px;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
-  }
-
-  .tf-node-chip strong {
-    font-size: 12.5px;
-    font-weight: 600;
-  }
-
-  .tf-node-chip span {
-    color: var(--color-muted);
-    font-family: var(--font-mono);
-    font-size: 9.5px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
   .tf-flow .react-flow__controls {
     overflow: hidden;
     border: 1px solid var(--color-line);

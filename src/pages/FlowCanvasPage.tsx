@@ -1088,9 +1088,9 @@ function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
   const { node } = data;
   const accent = node.kind === "extract" ? EXTRACT_COLOR : RECORD_COLOR;
   return (
-    <div
+    <Card
       className={cn(
-        "relative w-[240px] rounded-[10px] border border-line bg-white text-left shadow-[0_10px_28px_rgba(27,28,29,0.08)] transition-shadow",
+        "relative w-[240px] p-0 text-left transition-shadow",
         data.disabled ? "opacity-50" : "",
       )}
       style={{ borderLeft: `3px solid ${accent}` }}
@@ -1143,9 +1143,9 @@ function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
         style={{ width: 8, height: 8, background: "#fff", borderColor: accent }}
       />
       {selected ? (
-        <div className="pointer-events-none absolute inset-0 rounded-[10px] ring-2 ring-accent/25" />
+        <div className="pointer-events-none absolute inset-0 rounded-2xl ring-2 ring-accent/25" />
       ) : null}
-    </div>
+    </Card>
   );
 }
 

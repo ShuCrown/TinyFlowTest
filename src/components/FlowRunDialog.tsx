@@ -957,7 +957,7 @@ export function FlowRunDialog({
               ) : null}
             </div>
 
-            <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto border-t border-line bg-paper/70 p-3 lg:min-h-0 lg:w-[460px] lg:border-l lg:border-t-0">
+            <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto overflow-x-hidden border-t border-line bg-paper/70 p-3 lg:min-h-0 lg:w-[460px] lg:border-l lg:border-t-0">
               <RunStatusOverview
                 phaseLabel={PHASE_LABEL[phase]}
                 phaseVariant={phaseVariant}
@@ -1351,15 +1351,15 @@ function RunStepsPanel({
           {steps.length === 0 ? "画布没有可执行的节点。" : "没有可微调的节点。"}
         </p>
       ) : (
-        <div className="mt-3 grid min-h-0 flex-1 content-start gap-3 overflow-y-auto pr-1">
+        <div className="mt-3 grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] content-start gap-3 overflow-y-auto overflow-x-hidden pr-1">
           {groups.map((group) => (
-            <div key={group.key}>
+            <div key={group.key} className="min-w-0">
               <RunGroupHeader
                 label={group.label}
                 steps={groupTotals.get(group.groupId ?? "__none__") ?? group.steps}
                 itemMap={itemMap}
               />
-              <ol className="mt-2 grid gap-1.5">
+              <ol className="mt-2 grid grid-cols-[minmax(0,1fr)] gap-1.5">
                 {group.steps.map((step) => (
                   <RunStepCard
                     key={step.microId}
@@ -1487,7 +1487,7 @@ function RunStepCard({
     <li
       ref={(element) => registerRef(microId, element)}
       className={cn(
-        "rounded-lg border px-2.5 py-2 transition-colors",
+        "min-w-0 rounded-lg border px-2.5 py-2 transition-colors",
         // 状态边框直接沿用外框，避免和默认边框叠成双层描边。
         active
           ? status === "fail"
@@ -1662,7 +1662,7 @@ function InteractTuning({
       {injection ? (
         <p
           className={cn(
-            "text-[10px] leading-4",
+            "min-w-0 break-words text-[10px] leading-4",
             overridden ? "text-amber" : "text-accent",
           )}
         >
@@ -1826,13 +1826,13 @@ function PickerTuning({
                 }}
               />
             </TuningField>
-            <p className="pl-[68px] text-[9.5px] leading-4 text-muted">
+            <p className="min-w-0 break-words pl-[68px] text-[9.5px] leading-4 text-muted">
               字段：{step.target.label ?? step.adapter} · 默认：{literalText(step.value) || "空"}
             </p>
             {injection ? (
               <p
                 className={cn(
-                  "pl-[68px] text-[9.5px] leading-4",
+                  "min-w-0 break-words pl-[68px] text-[9.5px] leading-4",
                   value ? "text-amber" : "text-accent",
                 )}
               >
