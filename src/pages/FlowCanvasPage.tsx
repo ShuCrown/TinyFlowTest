@@ -341,6 +341,7 @@ export function FlowCanvasPage() {
   const [systems] = useState(() => listSystems());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [addSystemId, setAddSystemId] = useState("all");
   const [runOpen, setRunOpen] = useState(false);
   const [recorderOpen, setRecorderOpen] = useState(false);
   const [recordingNodeId, setRecordingNodeId] = useState<string | null>(null);
@@ -354,6 +355,23 @@ export function FlowCanvasPage() {
     for (const system of systems) map.set(system.id, system.name);
     return map;
   }, [systems]);
+
+  const addSystemOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const record of records) {
+      const id = record.systemId || "none";
+      options.set(id, record.systemId ? systemNames.get(record.systemId) ?? "系统已删除" : "未绑定系统");
+    }
+    return [...options.entries()].map(([id, name]) => ({ id, name }));
+  }, [records, systemNames]);
+
+  const addRecords = useMemo(
+    () =>
+      addSystemId === "all"
+        ? records
+        : records.filter((record) => (record.systemId || "none") === addSystemId),
+    [addSystemId, records],
+  );
 
   const currentFlow = useMemo<FlowItem | undefined>(
     () => (flow ? { ...flow, graph } : undefined),
@@ -816,11 +834,34 @@ export function FlowCanvasPage() {
                     </span>
                   </span>
                 </button>
-                <div className="mt-1 border-t border-line px-2.5 pb-1 pt-2">
+                <div className="mt-1 border-t border-line px-2.5 pb-1.5 pt-2">
                   <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted">
                     <Workflow className="size-3" />
                     操作记录
                   </div>
+                  {records.length > 0 ? (
+                    <div className="mt-1.5 flex max-h-[56px] flex-wrap gap-1 overflow-y-auto">
+                      {[{ id: "all", name: "全部" }, ...addSystemOptions].map((option) => {
+                        const active = addSystemId === option.id;
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            title={option.name}
+                            onClick={() => setAddSystemId(option.id)}
+                            className={cn(
+                              "max-w-full truncate rounded-full border px-2 py-0.5 text-[10.5px] leading-4 transition-colors",
+                              active
+                                ? "border-ink bg-ink font-medium text-panel"
+                                : "border-line bg-white text-muted hover:border-ink/25 hover:text-ink",
+                            )}
+                          >
+                            {option.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="grid max-h-[300px] gap-0.5 overflow-y-auto">
                   {records.length === 0 ? (
@@ -831,8 +872,12 @@ export function FlowCanvasPage() {
                       </Link>
                       录制一条。
                     </p>
+                  ) : addRecords.length === 0 ? (
+                    <p className="px-2.5 py-3 text-[11px] leading-4 text-muted">
+                      该系统下暂无操作记录。
+                    </p>
                   ) : (
-                    records.map((record) => (
+                    addRecords.map((record) => (
                       <button
                         key={record.id}
                         type="button"
@@ -841,7 +886,6 @@ export function FlowCanvasPage() {
                         onClick={() => addRecordNode(record.id)}
                         title={record.dsl ? "添加到画布" : "这条记录还没有可执行节点"}
                       >
-                        <span className="mt-0.5 size-1.5 shrink-0 rounded-full bg-accent" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[12px] font-medium">{record.name}</span>
                           <span className="mt-0.5 block truncate font-mono text-[9px] text-muted">
@@ -851,9 +895,6 @@ export function FlowCanvasPage() {
                               : "未绑定系统"}
                           </span>
                         </span>
-                        <Badge variant={record.status === "ready" ? "moss" : "amber"}>
-                          {record.status === "ready" ? "可运行" : "草稿"}
-                        </Badge>
                       </button>
                     ))
                   )}

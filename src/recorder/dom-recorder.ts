@@ -15,7 +15,7 @@ import {
 } from "../dsl/panel-rules.ts";
 import type { PanelRule, RuleMatch } from "../dsl/panel-rules.ts";
 import type { CellControl, CellRef } from "../dsl/types.ts";
-import { observeNetwork } from "../lib/network-observer.ts";
+import { observeNetwork, type ObservedResponse } from "../lib/network-observer.ts";
 import { OverlayWatcher } from "./overlay.ts";
 
 /** 弹层内的可选项角色：只有这些才把点击当成「选择」。 */
@@ -47,6 +47,9 @@ const HOVER_TRIGGER_SELECTOR =
   '[aria-haspopup],[aria-expanded],[class*="dropdown-trigger"],.ant-dropdown-trigger';
 
 const PRESS_KEYS = new Set(["Enter", "Tab", "Escape"]);
+
+/** 每条请求保留的响应体上限；录制 JSON 存在 localStorage，避免撑满。 */
+const MAX_CAPTURED_BODY_CHARS = 32 * 1024;
 
 interface TextStep {
   element: Element;
@@ -705,12 +708,16 @@ export class DomRecorder {
     return `extracted${index}`;
   }
 
-  /** 包装目标页 fetch / XHR；请求参数挂在触发它的步骤上，随录制 JSON 一起输出。 */
+  /** 包装目标页 fetch / XHR；请求参数与响应体挂在触发它的步骤上，随录制 JSON 一起输出。 */
   private installNetworkObserver(doc: Document): void {
     const win = doc.defaultView;
     if (!win) return;
     this.networkCleanup?.();
     this.networkCleanup = observeNetwork(win, {
+      readResponseBody: true,
+      maxBodyChars: MAX_CAPTURED_BODY_CHARS,
+      shouldReadResponseBody: (contentType) =>
+        !contentType || /json|text\/|xml/i.test(contentType),
       onRequest: (request) => this.onNetworkRequest(request),
       onResponse: (response) => this.onNetworkResponse(response),
     });
@@ -719,8 +726,8 @@ export class DomRecorder {
   private onNetworkRequest(request: CapturedRequest): void {
     if (!this.recording || !this.networkAction) return;
     if (Date.now() - this.networkAction.at > 2000) return;
-    // GET 轮询噪声太大；有请求体的 GET 或写请求才挂载。
-    if (request.method === "GET" && request.body === undefined) return;
+    // 只记录提交类接口，GET 查询与轮询不挂在步骤上。
+    if (!["POST", "PUT", "DELETE"].includes(request.method)) return;
     const step = this.networkAction.step;
     if (!this.steps.includes(step)) return;
     const requests = step.requests ?? (step.requests = []);
@@ -729,8 +736,11 @@ export class DomRecorder {
     this.emit();
   }
 
-  /** 响应回来只更新状态并刷新列表，不改变请求体。 */
-  private onNetworkResponse(_request: CapturedRequest): void {
+  /** 响应回来后把状态、content-type 与响应体回写到同一条请求上并刷新列表。 */
+  private onNetworkResponse(response: ObservedResponse): void {
+    const request = response as CapturedRequest & { bodyText?: string };
+    request.responseText = request.bodyText;
+    delete request.bodyText;
     if (this.recording) this.emit();
   }
 

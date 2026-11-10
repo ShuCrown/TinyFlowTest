@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   Crosshair,
+  FileJson,
   Loader2,
   MonitorDot,
   Play,
@@ -27,6 +28,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ApiCallRows, ApiRequestDialog, type ApiCallEntry } from "@/components/ApiCallLog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,6 +62,7 @@ import {
 import {
   createIframeHost,
   runFlow,
+  type CapturedHttpResponse,
   type ReplayEvent,
   type ReplayNodeStatus,
 } from "@/replay/index.ts";
@@ -222,6 +225,20 @@ export function RecordWorkbenchPage() {
     node: FlowNode;
     indices: number[];
   } | null>(null);
+  const [requestView, setRequestView] = useState<ApiCallEntry | null>(null);
+  const [replayRequests, setReplayRequests] = useState<CapturedHttpResponse[]>([]);
+  const replayApiCalls = useMemo<ApiCallEntry[]>(
+    () =>
+      replayRequests.map((entry) => ({
+        method: entry.method,
+        url: entry.url,
+        status: entry.status || undefined,
+        contentType: entry.contentType,
+        params: entry.requestBody,
+        response: entry.responseBody || undefined,
+      })),
+    [replayRequests],
+  );
 
   // 已保存的旧记录没有 sources，按当前步骤现场转换一份用于删除映射。
   const nodeSources = useMemo<Record<string, number[]> | null>(() => {
@@ -605,6 +622,7 @@ export function RecordWorkbenchPage() {
     if (!frame || !result || recording || replaying || busy) return;
     setReplaying(true);
     setRunItems([]);
+    setReplayRequests([]);
     setReplayText("回放中 · 准备导航…");
     setFrameLoaded(true);
     if (token.trim()) {
@@ -617,6 +635,10 @@ export function RecordWorkbenchPage() {
       }
     }
     const host = createIframeHost(frame);
+    // 回放校验始终开启网络抓取，便于查看提交参数与返回结构。
+    host.startNetworkCapture?.();
+    const syncRequests = (): void => setReplayRequests(host.getCapturedResponses());
+    const requestTimer = window.setInterval(syncRequests, 400);
     try {
       const dsl = {
         ...result.dsl,
@@ -681,6 +703,8 @@ export function RecordWorkbenchPage() {
     } catch (error) {
       setReplayText(`回放失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      window.clearInterval(requestTimer);
+      syncRequests();
       host.dispose();
       setReplaying(false);
     }
@@ -972,9 +996,49 @@ export function RecordWorkbenchPage() {
                           </>
                         ) : null}
                         {step.requests?.length ? (
-                          <p className="mt-0.5 truncate font-mono text-[10px] text-moss">
-                            {step.requests.map((request) => `${request.method} ${request.url}`).join(" · ")}
-                          </p>
+                          <div className="mt-1 flex flex-col gap-0.5">
+                            {step.requests.map((request, requestIndex) => (
+                              <button
+                                key={`${request.method}-${request.url}-${requestIndex}`}
+                                type="button"
+                                title="查看接口信息与 JSON"
+                                onClick={() =>
+                                  setRequestView({
+                                    method: request.method,
+                                    url: request.url,
+                                    status: request.status,
+                                    contentType: request.contentType,
+                                    params: request.body,
+                                    response: request.responseText,
+                                  })
+                                }
+                                className="group flex w-full min-w-0 items-center gap-1.5 rounded-md border border-transparent px-1 py-0.5 text-left transition-colors hover:border-line hover:bg-white"
+                              >
+                                <Badge
+                                  variant="secondary"
+                                  className="shrink-0 px-1.5 py-0 font-mono text-[9px]"
+                                >
+                                  {request.method}
+                                </Badge>
+                                <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted">
+                                  {request.url}
+                                </span>
+                                {request.status !== undefined ? (
+                                  <Badge
+                                    variant={
+                                      request.status >= 200 && request.status < 300
+                                        ? "moss"
+                                        : "destructive"
+                                    }
+                                    className="shrink-0 px-1.5 py-0 text-[9px]"
+                                  >
+                                    {request.status}
+                                  </Badge>
+                                ) : null}
+                                <FileJson className="size-3 shrink-0 text-muted group-hover:text-accent" />
+                              </button>
+                            ))}
+                          </div>
                         ) : null}
                       </div>
                     </li>
@@ -1149,6 +1213,16 @@ export function RecordWorkbenchPage() {
                         ))}
                       </ol>
                     ) : null}
+
+                    {replayApiCalls.length > 0 ? (
+                      <div className="mt-2">
+                        <p className="mb-1 flex items-center gap-1.5 text-[10.5px] font-medium text-muted">
+                          <FileJson className="size-3" />
+                          接口调用 {replayApiCalls.length}
+                        </p>
+                        <ApiCallRows entries={replayApiCalls} />
+                      </div>
+                    ) : null}
                   </div>
 
                   <p className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] text-muted">
@@ -1220,6 +1294,13 @@ export function RecordWorkbenchPage() {
           onApply={applyTuning}
         />
       ) : null}
+
+      <ApiRequestDialog
+        value={requestView}
+        onOpenChange={(open) => {
+          if (!open) setRequestView(null);
+        }}
+      />
 
       <AlertDialog
         open={Boolean(deletingNode)}

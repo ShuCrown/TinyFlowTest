@@ -4,13 +4,16 @@ import {
   type ReplayHost,
   type ResponseMatcher,
 } from "./types.ts";
-import { observeNetwork } from "../lib/network-observer.ts";
+import { observeNetwork, type ObservedRequest } from "../lib/network-observer.ts";
 
 export interface IframeHost extends ReplayHost {
+  /** 本次回放捕获过的接口调用；跨导航保留，供回放界面查看提交参数与响应。 */
+  getCapturedResponses(): CapturedHttpResponse[];
   dispose(): void;
 }
 
 const MAX_CAPTURED_RESPONSES = 30;
+const MAX_CAPTURED_HISTORY = 50;
 const MAX_CAPTURED_BODY_CHARS = 512 * 1024;
 
 interface ResponseWaiter {
@@ -31,6 +34,10 @@ export function createIframeHost(iframe: HTMLIFrameElement): IframeHost {
   let captureEnabled = false;
   let captureCleanup: (() => void) | null = null;
   const captured: CapturedHttpResponse[] = [];
+  /** 整次回放的接口记录：页面导航时不清空，只受条数上限约束。 */
+  const history: CapturedHttpResponse[] = [];
+  /** 请求对象 → 历史条目；响应回来后按引用回填状态与响应体。 */
+  const historyByRequest = new WeakMap<ObservedRequest, CapturedHttpResponse>();
   const waiters = new Set<ResponseWaiter>();
 
   const currentUrl = (): string | undefined => {
@@ -70,7 +77,30 @@ export function createIframeHost(iframe: HTMLIFrameElement): IframeHost {
       maxBodyChars: MAX_CAPTURED_BODY_CHARS,
       shouldReadResponseBody: (contentType) =>
         !contentType || /json|text\/|xml/i.test(contentType),
+      onRequest: (request) => {
+        // 只记录提交类接口；查询与轮询不进入接口日志。
+        if (!["POST", "PUT", "DELETE"].includes(request.method)) return;
+        // 请求一发出就入历史，响应体为空或请求失败也能看到提交参数。
+        const entry: CapturedHttpResponse = {
+          method: request.method,
+          url: request.url,
+          status: 0,
+          responseBody: "",
+          requestBody: requestBodyText(request.body),
+          capturedAt: Date.now(),
+        };
+        historyByRequest.set(request, entry);
+        history.push(entry);
+        if (history.length > MAX_CAPTURED_HISTORY) history.shift();
+      },
       onResponse: (response) => {
+        // 提交接口即使响应体为空（204 / 跳转）也保留在历史里，只更新状态。
+        const recorded = historyByRequest.get(response);
+        if (recorded) {
+          recorded.status = response.status;
+          recorded.contentType = response.contentType;
+          recorded.responseBody = response.bodyText ?? "";
+        }
         if (!response.bodyText) return;
         const entry: CapturedHttpResponse = {
           method: response.method,
@@ -193,11 +223,15 @@ export function createIframeHost(iframe: HTMLIFrameElement): IframeHost {
       if (!win) throw new ReplayError("目标页没有可用 window");
       return win.eval(expression) as T;
     },
+    getCapturedResponses(): CapturedHttpResponse[] {
+      return history.slice();
+    },
     dispose(): void {
       iframe.removeEventListener("load", onLoad);
       captureCleanup?.();
       captureCleanup = null;
       captured.length = 0;
+      history.length = 0;
       for (const waiter of [...waiters]) {
         window.clearTimeout(waiter.timer);
         detachAbort(waiter);

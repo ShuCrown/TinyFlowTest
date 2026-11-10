@@ -49,14 +49,12 @@ export function observeNetwork(win: Window, options: ObserveNetworkOptions): () 
         promise.then(
           (response) => {
             const contentType = response.headers.get("content-type") ?? undefined;
-            request.status = response.status;
+            const observed = request as ObservedResponse;
             const finish = (bodyText?: string): void => {
-              options.onResponse?.({
-                ...request,
-                status: response.status,
-                contentType,
-                bodyText,
-              });
+              observed.status = response.status;
+              observed.contentType = contentType;
+              if (bodyText !== undefined) observed.bodyText = bodyText;
+              options.onResponse?.(observed);
             };
             if (!shouldReadBody(contentType)) {
               finish();
@@ -111,17 +109,14 @@ export function observeNetwork(win: Window, options: ObserveNetworkOptions): () 
           "loadend",
           () => {
             const contentType = this.getResponseHeader("content-type") ?? undefined;
-            request.status = this.status;
-            let bodyText: string | undefined;
-            if (shouldReadBody(contentType)) {
-              bodyText = readXhrBody(this, maxChars);
-            }
-            options.onResponse?.({
-              ...request,
-              status: this.status,
-              contentType,
-              bodyText,
-            });
+            const observed = request as ObservedResponse;
+            const bodyText = shouldReadBody(contentType)
+              ? readXhrBody(this, maxChars)
+              : undefined;
+            observed.status = this.status;
+            observed.contentType = contentType;
+            if (bodyText !== undefined) observed.bodyText = bodyText;
+            options.onResponse?.(observed);
           },
           { once: true },
         );

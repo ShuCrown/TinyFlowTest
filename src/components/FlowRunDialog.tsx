@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
+  FileJson,
   Loader2,
   Pause,
   Play,
@@ -12,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 
+import { ApiCallRows, type ApiCallEntry } from "@/components/ApiCallLog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -43,7 +45,7 @@ import {
 import { injectSystemToken } from "@/lib/session";
 import { compileFlow } from "@/flow/compile.ts";
 import { createIframeHost, runFlow, type ReplayNodeStatus } from "@/replay/index.ts";
-import type { NodeFailureDecision, NodeFailureInfo } from "@/replay/index.ts";
+import type { CapturedHttpResponse, IframeHost, NodeFailureDecision, NodeFailureInfo } from "@/replay/index.ts";
 import type { ExtractNode, FlowNode, InteractNode, PickerNode, ValueLike } from "@/dsl/index.ts";
 import type { FlowItem, OperationRecord } from "@/lib/types";
 import { effectiveExtractName } from "@/flow/vars";
@@ -94,6 +96,18 @@ interface RunStep {
   /** 全局执行序号（1 基），与运行日志同序。 */
   index: number;
   tunable: "interact" | "picker" | "extract" | null;
+}
+
+/** 回放宿主捕获的接口 → 接口日志条目。 */
+function toApiCall(entry: CapturedHttpResponse): ApiCallEntry {
+  return {
+    method: entry.method,
+    url: entry.url,
+    status: entry.status || undefined,
+    contentType: entry.contentType,
+    params: entry.requestBody,
+    response: entry.responseBody || undefined,
+  };
 }
 
 type StepStatus = "pending" | RunItem["status"];
@@ -367,7 +381,7 @@ export function FlowRunDialog({
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const hostRef = useRef<{ dispose(): void } | null>(null);
+  const hostRef = useRef<IframeHost | null>(null);
   const pausedRef = useRef(false);
   const resumeRef = useRef<(() => void) | null>(null);
   const interventionRef = useRef<((decision: NodeFailureDecision) => void) | null>(null);
@@ -375,6 +389,7 @@ export function FlowRunDialog({
   const [phase, setPhase] = useState<RunPhase>("idle");
   const [statusText, setStatusText] = useState("点「开始运行」加载目标页并按画布顺序执行。");
   const [items, setItems] = useState<RunItem[]>([]);
+  const [apiCalls, setApiCalls] = useState<ApiCallEntry[]>([]);
   const [vars, setVars] = useState<Record<string, unknown>>({});
   const [failure, setFailure] = useState<NodeFailureInfo | null>(null);
   const [extractValue, setExtractValue] = useState("");
@@ -623,6 +638,7 @@ export function FlowRunDialog({
     setPhase("idle");
     setStatusText("点「开始运行」加载目标页并按画布顺序执行。");
     setItems([]);
+    setApiCalls([]);
     setVars({});
     setFailure(null);
     setExtractValue("");
@@ -710,6 +726,7 @@ export function FlowRunDialog({
       setStatusText(compiledState.error ?? "画布编译失败。");
       return;
     }
+    let apiTimer: number | undefined;
     try {
       const config = firstRecord ? (proxyConfig ?? (await loadProxyConfig())) : proxyConfig;
       if (config) setProxyConfig(config);
@@ -738,6 +755,12 @@ export function FlowRunDialog({
 
       const host = createIframeHost(frame);
       hostRef.current = host;
+      // 运行期间始终抓取接口，便于查看每步提交的参数与返回结构。
+      host.startNetworkCapture?.();
+      setApiCalls([]);
+      apiTimer = window.setInterval(() => {
+        setApiCalls(host.getCapturedResponses().map(toApiCall));
+      }, 400);
       const controller = new AbortController();
       abortRef.current = controller;
       setPhase("running");
@@ -889,7 +912,10 @@ export function FlowRunDialog({
       setPhase("failed");
       setStatusText(`运行失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      hostRef.current?.dispose();
+      if (apiTimer !== undefined) window.clearInterval(apiTimer);
+      const host = hostRef.current;
+      if (host) setApiCalls(host.getCapturedResponses().map(toApiCall));
+      host?.dispose();
       hostRef.current = null;
       abortRef.current = null;
       runtimeValuesRef.current = null;
@@ -1044,6 +1070,27 @@ export function FlowRunDialog({
               />
 
               <RunVarsCard vars={vars} />
+
+              <Card className="shrink-0">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
+                    <FileJson className="size-3.5 text-accent" />
+                    接口调用
+                  </h3>
+                  <Badge variant={apiCalls.length > 0 ? "moss" : "secondary"}>
+                    {apiCalls.length}
+                  </Badge>
+                </div>
+                {apiCalls.length > 0 ? (
+                  <div className="mt-2">
+                    <ApiCallRows entries={apiCalls} />
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[10.5px] leading-4 text-muted">
+                    运行时自动捕获提交接口，点击可查看请求参数与返回 JSON。
+                  </p>
+                )}
+              </Card>
 
               {unreachableCount > 0 ? (
                 <div className="rounded-xl bg-amber-soft/70 px-3 py-2 text-[10.5px] leading-4 text-amber">

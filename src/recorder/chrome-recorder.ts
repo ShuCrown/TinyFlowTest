@@ -61,12 +61,16 @@ export interface StepSemantic {
   cell?: CellRef;
 }
 
-/** 提交动作触发的 fetch / XHR 请求参数（只记录方法、URL、请求体、响应状态）。 */
+/** 提交动作触发的 fetch / XHR 请求参数与响应（查看 JSON 用）。 */
 export interface CapturedRequest {
   method: string;
   url: string;
   body?: unknown;
   status?: number;
+  /** 响应 content-type，便于判断是否为 JSON。 */
+  contentType?: string;
+  /** 响应体原文；JSON 接口保留原始文本，过长会截断。 */
+  responseText?: string;
 }
 
 export interface ChromeRecorderStep {
