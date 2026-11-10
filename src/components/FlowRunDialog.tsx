@@ -382,6 +382,8 @@ export function FlowRunDialog({
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const hostRef = useRef<IframeHost | null>(null);
+  const apiTimerRef = useRef<number | undefined>(undefined);
+  const apiSignatureRef = useRef("");
   const pausedRef = useRef(false);
   const resumeRef = useRef<(() => void) | null>(null);
   const interventionRef = useRef<((decision: NodeFailureDecision) => void) | null>(null);
@@ -644,6 +646,36 @@ export function FlowRunDialog({
     setExtractValue("");
   };
 
+  const stopApiPolling = (): void => {
+    if (apiTimerRef.current !== undefined) {
+      window.clearInterval(apiTimerRef.current);
+      apiTimerRef.current = undefined;
+    }
+  };
+
+  const disposeRunHost = (): void => {
+    stopApiPolling();
+    hostRef.current?.dispose();
+    hostRef.current = null;
+  };
+
+  /** 流程结束后继续观察接口，等提交响应回来再停；内容没变化时不触发重渲染。 */
+  const startApiPolling = (host: IframeHost): void => {
+    stopApiPolling();
+    apiSignatureRef.current = "";
+    const sync = (): void => {
+      const captured = host.getCapturedResponses();
+      const signature = captured
+        .map((entry) => `${entry.method} ${entry.url} ${entry.status}`)
+        .join("\n");
+      if (signature === apiSignatureRef.current) return;
+      apiSignatureRef.current = signature;
+      setApiCalls(captured.map(toApiCall));
+    };
+    sync();
+    apiTimerRef.current = window.setInterval(sync, 400);
+  };
+
   useEffect(() => {
     if (!open) {
       pausedRef.current = false;
@@ -653,8 +685,7 @@ export function FlowRunDialog({
       interventionRef.current = null;
       runtimeValuesRef.current = null;
       abortRef.current?.abort();
-      hostRef.current?.dispose();
-      hostRef.current = null;
+      disposeRunHost();
       reset();
     }
   }, [open]);
@@ -667,7 +698,7 @@ export function FlowRunDialog({
       interventionRef.current?.({ action: "stop" });
       interventionRef.current = null;
       abortRef.current?.abort();
-      hostRef.current?.dispose();
+      disposeRunHost();
     },
     [],
   );
@@ -716,6 +747,7 @@ export function FlowRunDialog({
     if (!frame) return;
 
     reset();
+    disposeRunHost();
     pausedRef.current = false;
     resumeRef.current = null;
     setPhase("loading");
@@ -726,7 +758,6 @@ export function FlowRunDialog({
       setStatusText(compiledState.error ?? "画布编译失败。");
       return;
     }
-    let apiTimer: number | undefined;
     try {
       const config = firstRecord ? (proxyConfig ?? (await loadProxyConfig())) : proxyConfig;
       if (config) setProxyConfig(config);
@@ -758,9 +789,7 @@ export function FlowRunDialog({
       // 运行期间始终抓取接口，便于查看每步提交的参数与返回结构。
       host.startNetworkCapture?.();
       setApiCalls([]);
-      apiTimer = window.setInterval(() => {
-        setApiCalls(host.getCapturedResponses().map(toApiCall));
-      }, 400);
+      startApiPolling(host);
       const controller = new AbortController();
       abortRef.current = controller;
       setPhase("running");
@@ -912,11 +941,8 @@ export function FlowRunDialog({
       setPhase("failed");
       setStatusText(`运行失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      if (apiTimer !== undefined) window.clearInterval(apiTimer);
-      const host = hostRef.current;
-      if (host) setApiCalls(host.getCapturedResponses().map(toApiCall));
-      host?.dispose();
-      hostRef.current = null;
+      // 不在这里 dispose：提交接口的响应常在最后一个节点结束后才回来，
+      // 保留宿主与轮询，等响应回填状态；关闭弹窗或下次运行时再统一释放。
       abortRef.current = null;
       runtimeValuesRef.current = null;
       pausedRef.current = false;

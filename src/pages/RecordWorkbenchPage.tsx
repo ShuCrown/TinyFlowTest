@@ -63,6 +63,7 @@ import {
   createIframeHost,
   runFlow,
   type CapturedHttpResponse,
+  type IframeHost,
   type ReplayEvent,
   type ReplayNodeStatus,
 } from "@/replay/index.ts";
@@ -253,6 +254,39 @@ export function RecordWorkbenchPage() {
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const recorderRef = useRef<DomRecorder | null>(null);
+  const replayHostRef = useRef<IframeHost | null>(null);
+  const replayTimerRef = useRef<number | undefined>(undefined);
+  const replaySignatureRef = useRef("");
+
+  const stopReplayPolling = (): void => {
+    if (replayTimerRef.current !== undefined) {
+      window.clearInterval(replayTimerRef.current);
+      replayTimerRef.current = undefined;
+    }
+  };
+
+  const disposeReplayHost = (): void => {
+    stopReplayPolling();
+    replayHostRef.current?.dispose();
+    replayHostRef.current = null;
+  };
+
+  /** 回放结束后继续观察接口，等提交响应回来再停；内容没变化时不触发重渲染。 */
+  const startReplayPolling = (host: IframeHost): void => {
+    stopReplayPolling();
+    replaySignatureRef.current = "";
+    const sync = (): void => {
+      const captured = host.getCapturedResponses();
+      const signature = captured
+        .map((entry) => `${entry.method} ${entry.url} ${entry.status}`)
+        .join("\n");
+      if (signature === replaySignatureRef.current) return;
+      replaySignatureRef.current = signature;
+      setReplayRequests(captured);
+    };
+    sync();
+    replayTimerRef.current = window.setInterval(sync, 400);
+  };
 
   const getRecorder = (): DomRecorder => {
     if (!recorderRef.current) {
@@ -316,6 +350,8 @@ export function RecordWorkbenchPage() {
     frame.addEventListener("load", handleLoad);
     return () => frame.removeEventListener("load", handleLoad);
   }, [recording]);
+
+  useEffect(() => () => disposeReplayHost(), []);
 
   if (!record) {
     return (
@@ -541,6 +577,8 @@ export function RecordWorkbenchPage() {
 
   const startRecording = async (): Promise<void> => {
     if (busy || recording || replaying) return;
+    disposeReplayHost();
+    setReplayRequests([]);
     setBusy(true);
     setResult(null);
     setSteps([]);
@@ -634,11 +672,12 @@ export function RecordWorkbenchPage() {
         // 目标跨域时无法注入，回放会在定位节点上给出明确失败信息。
       }
     }
+    disposeReplayHost();
     const host = createIframeHost(frame);
+    replayHostRef.current = host;
     // 回放校验始终开启网络抓取，便于查看提交参数与返回结构。
     host.startNetworkCapture?.();
-    const syncRequests = (): void => setReplayRequests(host.getCapturedResponses());
-    const requestTimer = window.setInterval(syncRequests, 400);
+    startReplayPolling(host);
     try {
       const dsl = {
         ...result.dsl,
@@ -703,9 +742,8 @@ export function RecordWorkbenchPage() {
     } catch (error) {
       setReplayText(`回放失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      window.clearInterval(requestTimer);
-      syncRequests();
-      host.dispose();
+      // 不在这里 dispose：提交接口的响应常在最后一个节点结束后才回来，
+      // 保留宿主与轮询，等响应回填状态；离开工作台或下次回放时再统一释放。
       setReplaying(false);
     }
   };
