@@ -14,6 +14,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -1162,7 +1163,7 @@ function RunStatusOverview({
   onFilterChange: (filter: "all" | "tunable") => void;
 }) {
   return (
-    <section className="shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
+    <Card className="shrink-0">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
           运行状态
@@ -1200,7 +1201,7 @@ function RunStatusOverview({
       {summary.currentLabel ? (
         <p className="mt-1 break-words text-[10.5px] leading-4 text-muted">{statusText}</p>
       ) : null}
-    </section>
+    </Card>
   );
 }
 
@@ -1228,10 +1229,7 @@ function RunMetrics({ summary, dirtyCount }: { summary: RunSummary; dirtyCount: 
   return (
     <div className="grid shrink-0 grid-cols-[1.85fr_1fr_1fr] gap-2.5">
       {metrics.map((metric) => (
-        <div
-          key={metric.label}
-          className="rounded-xl bg-white p-3 shadow-[0_4px_16px_rgba(27,28,29,0.05)]"
-        >
+        <Card key={metric.label} className="p-3">
           <div className="text-[10.5px] text-muted">{metric.label}</div>
           <div
             className={cn(
@@ -1242,7 +1240,7 @@ function RunMetrics({ summary, dirtyCount }: { summary: RunSummary; dirtyCount: 
             {String(metric.value).padStart(2, "0")}
           </div>
           <div className="mt-1.5 text-[10px] text-[#9a968c]">{metric.hint}</div>
-        </div>
+        </Card>
       ))}
     </div>
   );
@@ -1252,7 +1250,7 @@ function RunVarsCard({ vars }: { vars: Record<string, unknown> }) {
   const entries = Object.entries(vars);
   if (entries.length === 0) return null;
   return (
-    <section className="shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
+    <Card className="shrink-0">
       <div className="font-mono text-[10px] font-semibold tracking-[0.1em] text-muted">
         运行变量
       </div>
@@ -1268,7 +1266,7 @@ function RunVarsCard({ vars }: { vars: Record<string, unknown> }) {
       <p className="mt-2.5 text-[10.5px] leading-4 text-muted">
         取值节点产出的变量会注入下一条记录的筛选值。
       </p>
-    </section>
+    </Card>
   );
 }
 
@@ -1342,7 +1340,7 @@ function RunStepsPanel({
   }
 
   return (
-    <section className="flex min-h-[220px] min-w-0 flex-1 flex-col rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]">
+    <Card className="min-h-[220px] min-w-0 flex-1">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <h3 className="text-[13px] font-semibold">节点步骤</h3>
         <span className="text-[10.5px] text-muted">按执行顺序 · 同组共享容器</span>
@@ -1386,7 +1384,7 @@ function RunStepsPanel({
           ))}
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 

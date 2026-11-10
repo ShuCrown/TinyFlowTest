@@ -11,6 +11,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -443,43 +444,45 @@ const ExtractRecorderDialog = ({
                   ) : null}
                 </div>
 
-                <aside className="flex w-full shrink-0 flex-col border-t border-line bg-panel lg:w-[280px] lg:border-l lg:border-t-0">
-                  <div className="flex items-center justify-between border-b border-line px-3 py-2">
-                    <span className="text-[11.5px] font-medium">录制步骤</span>
-                    <Badge variant="secondary">{steps.length}</Badge>
-                  </div>
-                  <ol className="min-h-0 flex-1 overflow-y-auto p-2">
-                    {steps.length === 0 ? (
-                      <li className="px-1.5 py-3 text-[11px] leading-5 text-muted">
-                        还没有步骤。先在目标页完成操作，再点「录制取值」选中要读取的字段。
-                      </li>
-                    ) : (
-                      steps.map((item, index) => (
-                        <li
-                          key={`${item.type ?? "step"}-${index}`}
-                          className={cn(
-                            "flex items-start gap-1.5 rounded-md px-1.5 py-1.5 text-[10.5px]",
-                            item.type === "extract" && "bg-moss/10",
-                          )}
-                        >
-                          <span className="pt-0.5 font-mono text-[9px] text-muted">
-                            {String(index + 1).padStart(2, "0")}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate font-medium">
-                              {STEP_LABEL[item.type ?? ""] ?? item.type ?? "步骤"}
-                            </span>
-                            <span className="block truncate text-[9.5px] text-muted">
-                              {stepLabel(item)}
-                            </span>
-                          </span>
+                <aside className="flex w-full shrink-0 flex-col border-t border-line bg-paper/70 p-2 lg:w-[280px] lg:border-l lg:border-t-0">
+                  <Card className="min-h-0 flex-1 gap-0 p-0">
+                    <div className="flex items-center justify-between border-b border-line px-3 py-2">
+                      <span className="text-[11.5px] font-medium">录制步骤</span>
+                      <Badge variant="secondary">{steps.length}</Badge>
+                    </div>
+                    <ol className="grid min-h-0 flex-1 content-start gap-1.5 overflow-y-auto p-2">
+                      {steps.length === 0 ? (
+                        <li className="px-1.5 py-3 text-[11px] leading-5 text-muted">
+                          还没有步骤。先在目标页完成操作，再点「录制取值」选中要读取的字段。
                         </li>
-                      ))
-                    )}
-                  </ol>
-                  <p className="border-t border-line px-3 py-2 text-[10px] leading-4 text-muted">
-                    每个「取值」步骤都会成为一个变量；操作和取值按录制顺序保留。
-                  </p>
+                      ) : (
+                        steps.map((item, index) => (
+                          <li
+                            key={`${item.type ?? "step"}-${index}`}
+                            className={cn(
+                              "flex items-start gap-1.5 rounded-lg border border-line px-2.5 py-2 text-[10.5px]",
+                              item.type === "extract" && "border-moss/30 bg-moss/10",
+                            )}
+                          >
+                            <span className="pt-0.5 font-mono text-[9px] text-muted">
+                              {String(index + 1).padStart(2, "0")}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-medium">
+                                {STEP_LABEL[item.type ?? ""] ?? item.type ?? "步骤"}
+                              </span>
+                              <span className="block truncate text-[9.5px] text-muted">
+                                {stepLabel(item)}
+                              </span>
+                            </span>
+                          </li>
+                        ))
+                      )}
+                    </ol>
+                    <p className="border-t border-line px-3 py-2 text-[10px] leading-4 text-muted">
+                      每个「取值」步骤都会成为一个变量；操作和取值按录制顺序保留。
+                    </p>
+                  </Card>
                 </aside>
               </div>
             </DialogBody>

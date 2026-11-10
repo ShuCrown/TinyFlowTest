@@ -3,6 +3,7 @@ import { Loader2, Play, RotateCcw, Square, TriangleAlert, Video, X } from "lucid
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogBody,
@@ -433,97 +434,99 @@ export function RecordReplayDialog({
               ) : null}
             </div>
 
-            <aside className="flex w-full shrink-0 flex-col border-t border-line bg-panel/70 lg:w-[400px] lg:border-l lg:border-t-0">
-              <div className="border-b border-line px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[12px] font-semibold">回放状态</span>
-                  <Badge variant={PHASE_VARIANT[phase]}>{PHASE_LABEL[phase]}</Badge>
+            <aside className="flex w-full shrink-0 flex-col border-t border-line bg-paper/70 p-2 lg:w-[400px] lg:border-l lg:border-t-0">
+              <Card className="min-h-0 flex-1 gap-0 p-0">
+                <div className="border-b border-line px-4 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[12px] font-semibold">回放状态</span>
+                    <Badge variant={PHASE_VARIANT[phase]}>{PHASE_LABEL[phase]}</Badge>
+                  </div>
+                  <p className="mt-1 break-words text-[11.5px] leading-5 text-muted">{statusText}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {active ? (
+                      <Button size="sm" variant="destructive" onClick={stop}>
+                        <Square />
+                        停止
+                      </Button>
+                    ) : (
+                      <Button size="sm" onClick={() => void start()} disabled={!dsl}>
+                        {phase === "finished" || phase === "failed" || phase === "login" ? (
+                          <RotateCcw />
+                        ) : (
+                          <Play />
+                        )}
+                        {phase === "finished" || phase === "failed" || phase === "login"
+                          ? "重新回放"
+                          : "开始回放"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
-                <p className="mt-1 break-words text-[11.5px] leading-5 text-muted">{statusText}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  {active ? (
-                    <Button size="sm" variant="destructive" onClick={stop}>
-                      <Square />
-                      停止
-                    </Button>
+
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
+                      STEPS · 执行步骤
+                    </span>
+                    <Badge variant="secondary">{dsl?.nodes.length ?? 0}</Badge>
+                  </div>
+
+                  {!dsl || dsl.nodes.length === 0 ? (
+                    <p className="mt-2 text-[11.5px] leading-5 text-muted">
+                      这条记录还没有可执行节点，请先在录制页生成 DSL。
+                    </p>
                   ) : (
-                    <Button size="sm" onClick={() => void start()} disabled={!dsl}>
-                      {phase === "finished" || phase === "failed" || phase === "login" ? (
-                        <RotateCcw />
-                      ) : (
-                        <Play />
-                      )}
-                      {phase === "finished" || phase === "failed" || phase === "login"
-                        ? "重新回放"
-                        : "开始回放"}
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
-                    STEPS · 执行步骤
-                  </span>
-                  <Badge variant="secondary">{dsl?.nodes.length ?? 0}</Badge>
-                </div>
-
-                {!dsl || dsl.nodes.length === 0 ? (
-                  <p className="mt-2 text-[11.5px] leading-5 text-muted">
-                    这条记录还没有可执行节点，请先在录制页生成 DSL。
-                  </p>
-                ) : (
-                  <ol className="mt-2 grid gap-1.5">
-                    {dsl.nodes.map((step, index) => {
-                      const runItem = items.find((item) => item.nodeId === step.id);
-                      return (
-                        <li
-                          key={step.id}
-                          className="rounded-lg border border-line bg-white px-2.5 py-2"
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-[9.5px] text-muted">
-                              {String(index + 1).padStart(2, "0")}
-                            </span>
-                            <Badge variant="outline">{STEP_TYPE_LABEL[step.type]}</Badge>
-                            <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium">
-                              {stepLabel(step)}
-                            </span>
-                            {runItem?.durationMs !== undefined ? (
+                    <ol className="mt-2 grid gap-1.5">
+                      {dsl.nodes.map((step, index) => {
+                        const runItem = items.find((item) => item.nodeId === step.id);
+                        return (
+                          <li
+                            key={step.id}
+                            className="rounded-lg border border-line px-2.5 py-2"
+                          >
+                            <div className="flex items-center gap-1.5">
                               <span className="font-mono text-[9.5px] text-muted">
-                                {runItem.durationMs}ms
+                                {String(index + 1).padStart(2, "0")}
                               </span>
-                            ) : null}
-                            {runItem ? (
-                              <Badge variant={RUN_BADGE[runItem.status].variant}>
-                                {RUN_BADGE[runItem.status].label}
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <p className="mt-0.5 break-words pl-[22px] text-[10.5px] leading-4 text-muted">
-                            {stepDetail(step)}
-                          </p>
-                          {runItem && runItem.status !== "running" ? (
-                            <p className="mt-0.5 break-words pl-[22px] text-[10.5px] leading-4 text-muted">
-                              {runItem.message}
-                              {runItem.strategy ? (
-                                <span className="ml-1 font-mono text-[9.5px] text-accent">
-                                  {runItem.strategy}
+                              <Badge variant="outline">{STEP_TYPE_LABEL[step.type]}</Badge>
+                              <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium">
+                                {stepLabel(step)}
+                              </span>
+                              {runItem?.durationMs !== undefined ? (
+                                <span className="font-mono text-[9.5px] text-muted">
+                                  {runItem.durationMs}ms
                                 </span>
                               ) : null}
+                              {runItem ? (
+                                <Badge variant={RUN_BADGE[runItem.status].variant}>
+                                  {RUN_BADGE[runItem.status].label}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <p className="mt-0.5 break-words pl-[22px] text-[10.5px] leading-4 text-muted">
+                              {stepDetail(step)}
                             </p>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ol>
-                )}
+                            {runItem && runItem.status !== "running" ? (
+                              <p className="mt-0.5 break-words pl-[22px] text-[10.5px] leading-4 text-muted">
+                                {runItem.message}
+                                {runItem.strategy ? (
+                                  <span className="ml-1 font-mono text-[9.5px] text-accent">
+                                    {runItem.strategy}
+                                  </span>
+                                ) : null}
+                              </p>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
 
-                <p className="mt-3 text-[10.5px] leading-4 text-muted">
-                  回放使用这条记录自己的录制值/微调值；流程里的环境变量注入请在画布点「运行流程」。
-                </p>
-              </div>
+                  <p className="mt-3 text-[10.5px] leading-4 text-muted">
+                    回放使用这条记录自己的录制值/微调值；流程里的环境变量注入请在画布点「运行流程」。
+                  </p>
+                </div>
+              </Card>
             </aside>
           </div>
         </DialogBody>

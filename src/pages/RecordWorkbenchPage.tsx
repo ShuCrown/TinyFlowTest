@@ -302,7 +302,7 @@ export function RecordWorkbenchPage() {
 
   if (!record) {
     return (
-      <Card className="mt-8 items-center px-6 py-12 text-center">
+      <Card className="mt-8 items-center p-0 px-6 py-12 text-center">
         <h1 className="text-[16px] font-semibold">记录不存在</h1>
         <p className="mt-1 text-[12.5px] text-muted">可能已被删除，返回记录列表重新选择。</p>
         <Button className="mt-5" onClick={() => navigate("/records")}>
@@ -772,7 +772,7 @@ export function RecordWorkbenchPage() {
 
       <div className="mt-4 flex min-h-0 flex-col gap-3 xl:flex-1 xl:flex-row xl:items-stretch">
         <div className="flex w-full min-w-0 shrink-0 flex-col gap-2.5 xl:min-h-0 xl:w-[380px] xl:overflow-y-auto xl:pr-1">
-          <Card className="shrink-0 gap-0 overflow-hidden">
+          <Card className="shrink-0 gap-0 overflow-hidden p-0">
             <CardHeader className="flex flex-row items-center justify-between border-b border-line px-4 pb-2.5 pt-3">
               <CardTitle>所属系统</CardTitle>
               <Badge variant={currentSystem ? "moss" : "secondary"}>
@@ -822,7 +822,7 @@ export function RecordWorkbenchPage() {
             </CardContent>
           </Card>
 
-          <Card className="shrink-0 gap-0 overflow-hidden">
+          <Card className="shrink-0 gap-0 overflow-hidden p-0">
             <CardHeader className="flex flex-row items-center justify-between border-b border-line px-4 pb-2.5 pt-3">
               <CardTitle>录制事件</CardTitle>
               <Badge variant="secondary">{steps.length} 步</Badge>
@@ -998,7 +998,7 @@ export function RecordWorkbenchPage() {
             </CardContent>
           </Card>
 
-          <Card className="flex flex-col gap-0 overflow-hidden xl:min-h-[320px] xl:flex-1">
+          <Card className="flex flex-col gap-0 overflow-hidden p-0 xl:min-h-[320px] xl:flex-1">
             <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-line px-4 pb-2.5 pt-3">
               <CardTitle>转换结果</CardTitle>
               {result ? (
@@ -1161,7 +1161,7 @@ export function RecordWorkbenchPage() {
           </Card>
         </div>
 
-        <Card className="flex w-full min-w-0 flex-col gap-0 overflow-hidden xl:min-h-0 xl:flex-1">
+        <Card className="flex w-full min-w-0 flex-col gap-0 overflow-hidden p-0 xl:min-h-0 xl:flex-1">
           <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-2.5">
             <div className="flex min-w-0 items-center gap-2">
               <CardTitle>目标系统</CardTitle>

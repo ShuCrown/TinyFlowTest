@@ -284,7 +284,7 @@ export function RecordsPage() {
       />
 
       {records.length === 0 ? (
-        <Card className="mt-5 gap-0 border-dashed bg-panel/60 shadow-none">
+        <Card className="mt-5 gap-0 border border-dashed border-line bg-panel/60 p-0 shadow-none">
           <CardContent className="flex flex-col items-center px-6 py-12 text-center">
             <div className="grid size-11 place-items-center rounded-[12px] border border-line bg-white font-mono text-[11px] font-semibold tracking-[0.14em] text-accent">
               REC

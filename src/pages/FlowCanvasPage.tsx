@@ -38,6 +38,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -1791,16 +1792,7 @@ function InspectorCard({
   className?: string;
   children: ReactNode;
 }) {
-  return (
-    <section
-      className={cn(
-        "shrink-0 rounded-2xl bg-white p-4 shadow-[0_4px_16px_rgba(27,28,29,0.05)]",
-        className,
-      )}
-    >
-      {children}
-    </section>
-  );
+  return <Card className={cn("shrink-0", className)}>{children}</Card>;
 }
 
 function InspectorSectionHeader({
