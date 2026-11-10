@@ -98,10 +98,10 @@ const PHASE_BOX: Record<Phase, string> = {
   idle: "border-line bg-white text-muted",
   opening: "border-accent/20 bg-accent-soft text-accent",
   login: "border-amber/20 bg-amber-soft text-amber",
-  recording: "border-danger/20 bg-[#fdf3f0] text-danger",
+  recording: "border-danger/20 bg-danger-soft text-danger",
   finished: "border-accent/20 bg-accent-soft text-accent",
   empty: "border-amber/20 bg-amber-soft text-amber",
-  failed: "border-danger/20 bg-[#fdf3f0] text-danger",
+  failed: "border-danger/20 bg-danger-soft text-danger",
   saved: "border-moss/20 bg-moss-soft text-moss",
 };
 
@@ -767,7 +767,7 @@ export function RecordWorkbenchPage() {
     .map(([name]) => name);
 
   return (
-    <div className="flex flex-col pb-10 xl:h-[calc(100vh-48px)] xl:overflow-hidden xl:pb-0">
+    <div className="flex flex-col pb-10 xl:h-[calc(100vh-32px)] xl:overflow-hidden xl:pb-0">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
         <div className="flex min-w-0 items-center gap-3">
           <Button size="sm" variant="outline" onClick={() => navigate("/records")}>
@@ -833,7 +833,7 @@ export function RecordWorkbenchPage() {
       ) : null}
 
       <div className="mt-4 flex min-h-0 flex-col gap-3 xl:flex-1 xl:flex-row xl:items-stretch">
-        <div className="flex w-full min-w-0 shrink-0 flex-col gap-2.5 xl:min-h-0 xl:w-[380px] xl:overflow-y-auto xl:pr-1">
+        <div className="flex w-full min-w-0 shrink-0 flex-col gap-2.5 xl:min-h-0 xl:w-[360px] xl:overflow-y-auto xl:pr-1">
           <Card className="shrink-0 gap-0 overflow-hidden p-0">
             <CardHeader className="flex flex-row items-center justify-between border-b border-line px-4 pb-2.5 pt-3">
               <CardTitle>所属系统</CardTitle>
@@ -1178,7 +1178,7 @@ export function RecordWorkbenchPage() {
                             ) : null}
                             <button
                               type="button"
-                              className="grid size-6 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-[#fdf3f0] hover:text-danger disabled:pointer-events-none disabled:opacity-35"
+                              className="grid size-6 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-danger-soft hover:text-danger disabled:pointer-events-none disabled:opacity-35"
                               title={
                                 canDelete
                                   ? `删除节点（连带 ${sourceCount} 条录制事件）`
@@ -1196,7 +1196,7 @@ export function RecordWorkbenchPage() {
                     </div>
                   </div>
 
-                  <div className="shrink-0 rounded-xl border border-line bg-white/70 p-2.5">
+                  <div className="shrink-0 rounded-xl border border-line bg-paper/60 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5 text-[11.5px] font-medium">
                         <Play className="size-3.5 text-accent" />

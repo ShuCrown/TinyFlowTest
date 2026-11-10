@@ -55,7 +55,7 @@ export function Shell() {
       </aside>
 
       <main
-        className={`min-w-0 flex-1 ${isCanvas ? "px-3 py-3 lg:px-4 lg:py-4" : "px-4 py-6 md:px-8 lg:px-10"}`}
+        className={`min-w-0 flex-1 ${isCanvas ? "px-3 py-3 lg:px-4 lg:py-4" : "px-4 py-4 md:px-6 lg:px-8"}`}
       >
         <div className="w-full">
           <Outlet />

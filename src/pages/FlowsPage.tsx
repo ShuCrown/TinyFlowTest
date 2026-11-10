@@ -1,11 +1,32 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Pencil, Plus, Save, Trash2, Workflow, X } from "lucide-react";
+import { Pencil, Plus, Save, Trash2, TriangleAlert, Workflow, X } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Dialog, EmptyState, Field, ItemCard, PageHeader } from "../components/ui";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { EmptyState, Field, ItemCard, PageHeader } from "../components/ui";
 import { deleteFlow, formatTime, listFlows, newId, saveFlow } from "../lib/store";
 import type { FlowItem } from "../lib/types";
 
@@ -44,46 +65,58 @@ function FlowDialog({
   return (
     <Dialog
       open
-      title={flow ? "编辑流程" : "新建流程"}
-      description="流程用来组织多条操作记录的执行顺序。保存后进入画布，用取值节点把上一步的主键 code 带到下一步。"
-      onClose={onClose}
-      footer={
-        <>
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{flow ? "编辑流程" : "新建流程"}</DialogTitle>
+          <DialogDescription>
+            流程用来组织多条操作记录的执行顺序。保存后进入画布，用取值节点把上一步的主键 code
+            带到下一步。
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogBody>
+          <form id="flow-form" className="grid gap-4" onSubmit={submit}>
+            <Field label="流程名称" htmlFor="flow-name">
+              <Input
+                id="flow-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="例如：客户开户 → 下单"
+                autoFocus
+              />
+            </Field>
+            <Field label="说明（可选）" htmlFor="flow-description">
+              <Textarea
+                id="flow-description"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="这条流程覆盖的业务链路、前置条件或注意事项"
+              />
+            </Field>
+            {error ? (
+              <div className="flex items-start gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-[12px] leading-5 text-danger">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            ) : null}
+          </form>
+        </DialogBody>
+
+        <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             <X />
             取消
           </Button>
-          <Button variant="default" type="submit" form="flow-form">
+          <Button type="submit" form="flow-form">
             <Save />
             保存流程
           </Button>
-        </>
-      }
-    >
-      <form id="flow-form" className="grid gap-4" onSubmit={submit}>
-        <Field label="流程名称">
-          <input
-            className="tf-input"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="例如：客户开户 → 下单"
-            autoFocus
-          />
-        </Field>
-        <Field label="说明（可选）">
-          <textarea
-            className="tf-textarea"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="这条流程覆盖的业务链路、前置条件或注意事项"
-          />
-        </Field>
-        {error ? (
-          <p className="rounded-lg border border-danger/20 bg-[#fdf3f0] px-3 py-2 text-[12px] leading-5 text-danger">
-            {error}
-          </p>
-        ) : null}
-      </form>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 }
@@ -93,6 +126,7 @@ export function FlowsPage() {
   const [flows, setFlows] = useState<FlowItem[]>(() => listFlows());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<FlowItem | null>(null);
+  const [deleting, setDeleting] = useState<FlowItem | null>(null);
 
   const openCreate = (): void => {
     setEditing(null);
@@ -125,14 +159,15 @@ export function FlowsPage() {
     if (!wasEditing) navigate(`/flows/${next.id}/canvas`);
   };
 
-  const handleDelete = (flow: FlowItem): void => {
-    if (!window.confirm(`删除流程「${flow.name}」？`)) return;
-    deleteFlow(flow.id);
+  const confirmDelete = (): void => {
+    if (!deleting) return;
+    deleteFlow(deleting.id);
     setFlows(listFlows());
+    setDeleting(null);
   };
 
   return (
-    <div className="pb-10">
+    <div className="flex flex-col gap-4 pb-10">
       <PageHeader
         code="FLW / FLOWS"
         title="流程"
@@ -146,47 +181,45 @@ export function FlowsPage() {
       />
 
       {flows.length === 0 ? (
-        <div className="mt-5">
-          <EmptyState
-            code="FLW"
-            title="还没有流程"
-            description="先建立流程，再把新建 / 编辑类的操作记录按顺序放进来。编号扣子会把上一步产出的业务编号，带到下一步的字段赋值或筛选。"
-            action={
-              <Button size="sm" variant="default" onClick={openCreate}>
-                <Plus />
-                新建第一条流程
-              </Button>
-            }
-          >
-            <div className="mx-auto flex max-w-[860px] flex-wrap items-center justify-center gap-2">
-              <Card className="min-w-[132px] gap-1 border-l-[3px] border-l-accent p-2.5">
-                <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted">
-                  OP · 操作记录
-                </span>
-                <strong className="text-[12.5px] font-semibold">新建客户</strong>
-              </Card>
-              <span className="font-mono text-[10px] text-muted">──▶</span>
-              <Card className="min-w-[132px] gap-1 border-l-[3px] border-l-moss p-2.5">
-                <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted">
-                  CODE · 编号扣子
-                </span>
-                <strong className="text-[12.5px] font-semibold">customerCode</strong>
-              </Card>
-              <span className="font-mono text-[10px] text-muted">──▶</span>
-              <Card className="min-w-[132px] gap-1 border-l-[3px] border-l-accent p-2.5">
-                <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted">
-                  OP · 操作记录
-                </span>
-                <strong className="text-[12.5px] font-semibold">新建订单</strong>
-              </Card>
-            </div>
-            <p className="mt-3 font-mono text-[10px] tracking-[0.08em] text-muted">
-              customerCode 通过虚线扣子注入下一步表单 / 筛选
-            </p>
-          </EmptyState>
-        </div>
+        <EmptyState
+          code="FLW"
+          title="还没有流程"
+          description="先建立流程，再把新建 / 编辑类的操作记录按顺序放进来。编号扣子会把上一步产出的业务编号，带到下一步的字段赋值或筛选。"
+          action={
+            <Button size="sm" variant="default" onClick={openCreate}>
+              <Plus />
+              新建第一条流程
+            </Button>
+          }
+        >
+          <div className="mx-auto flex max-w-[860px] flex-wrap items-center justify-center gap-2">
+            <Card className="min-w-[132px] gap-1 border-l-[3px] border-l-accent p-2.5">
+              <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted">
+                OP · 操作记录
+              </span>
+              <strong className="text-[12.5px] font-semibold">新建客户</strong>
+            </Card>
+            <span className="font-mono text-[10px] text-muted">──▶</span>
+            <Card className="min-w-[132px] gap-1 border-l-[3px] border-l-moss p-2.5">
+              <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted">
+                CODE · 编号扣子
+              </span>
+              <strong className="text-[12.5px] font-semibold">customerCode</strong>
+            </Card>
+            <span className="font-mono text-[10px] text-muted">──▶</span>
+            <Card className="min-w-[132px] gap-1 border-l-[3px] border-l-accent p-2.5">
+              <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-muted">
+                OP · 操作记录
+              </span>
+              <strong className="text-[12.5px] font-semibold">新建订单</strong>
+            </Card>
+          </div>
+          <p className="mt-3 font-mono text-[10px] tracking-[0.08em] text-muted">
+            customerCode 通过虚线扣子注入下一步表单 / 筛选
+          </p>
+        </EmptyState>
       ) : (
-        <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {flows.map((flow) => (
             <ItemCard
               key={flow.id}
@@ -211,7 +244,7 @@ export function FlowsPage() {
                     <Pencil className="size-3.5" />
                     编辑
                   </Button>
-                  <Button size="sm" variant="destructive" onClick={() => handleDelete(flow)}>
+                  <Button size="sm" variant="destructive" onClick={() => setDeleting(flow)}>
                     <Trash2 className="size-3.5" />
                     删除
                   </Button>
@@ -237,6 +270,32 @@ export function FlowsPage() {
           onSave={handleSave}
         />
       ) : null}
+
+      <AlertDialog
+        open={Boolean(deleting)}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除这条流程？</AlertDialogTitle>
+            <AlertDialogDescription>
+              「{deleting?.name}」会从当前浏览器移除，画布编排与注入配置将无法恢复；操作记录本身不会被删除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              <X />
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>
+              <Trash2 />
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

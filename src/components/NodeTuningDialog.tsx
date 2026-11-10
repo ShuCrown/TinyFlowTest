@@ -334,7 +334,7 @@ function NodeTuningDialog({
 
         <DialogBody className="min-h-0 flex-1 overflow-y-auto p-0">
           {error ? (
-            <div className="mx-5 mt-4 flex items-start gap-2 rounded-lg border border-danger/20 bg-[#fdf3f0] px-3 py-2 text-[12px] leading-5 text-danger">
+            <div className="mx-5 mt-4 flex items-start gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-[12px] leading-5 text-danger">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
               <span>{error}</span>
             </div>

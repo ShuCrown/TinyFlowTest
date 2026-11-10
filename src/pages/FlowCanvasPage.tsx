@@ -79,7 +79,7 @@ import {
 import type { ExtractProducer } from "@/flow/vars.ts";
 
 const EMPTY_GRAPH: FlowGraph = { nodes: [], edges: [], injections: [], vars: [] };
-const RECORD_COLOR = "#c14b2a";
+const RECORD_COLOR = "#1b365d";
 const EXTRACT_COLOR = "#2d6a4f";
 
 type SlotsMode = "recorded" | "literal" | "var";
@@ -490,8 +490,8 @@ export function FlowCanvasPage() {
         source: edge.from,
         target: edge.to,
         type: "flowEdge",
-        markerEnd: { type: MarkerType.ArrowClosed, color: "#b34a2b", width: 17, height: 17 },
-        style: { stroke: "rgba(193,75,42,0.55)", strokeWidth: 1.5 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#1b365d", width: 17, height: 17 },
+        style: { stroke: "rgba(27,54,93,0.5)", strokeWidth: 1.5 },
       })),
     [graph.edges],
   );
@@ -918,7 +918,7 @@ export function FlowCanvasPage() {
         </span>
       </div>
 
-      <div className="mt-3 grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_440px]">
+      <div className="mt-3 grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="flex min-h-0 flex-col gap-2">
           <div className="tf-flow relative h-[68vh] min-h-[520px] overflow-hidden rounded-xl border border-line bg-paper xl:h-auto xl:flex-1">
             <ReactFlow<FlowRfNode, Edge>
@@ -1020,7 +1020,7 @@ export function FlowCanvasPage() {
             className={cn(
               "flex shrink-0 flex-wrap items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px]",
               compiled.error
-                ? "border-danger/20 bg-[#fdf3f0] text-danger"
+                ? "border-danger/20 bg-danger-soft text-danger"
                 : "border-moss/20 bg-moss-soft/60 text-moss",
             )}
           >
@@ -1047,7 +1047,7 @@ export function FlowCanvasPage() {
           </div>
         </div>
 
-        <aside className="flex max-h-[70vh] min-h-0 flex-col gap-3 overflow-y-auto rounded-2xl border border-line bg-paper/70 p-3 xl:max-h-none">
+        <aside className="flex max-h-[70vh] min-h-0 flex-col gap-3 overflow-y-auto xl:max-h-none">
           {selected ? (
             selected.kind === "record" ? (
               <RecordInspector
@@ -1163,7 +1163,7 @@ function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
             </span>
           ) : null}
           {data.missing ? (
-            <span className="rounded border border-danger/25 bg-[#fdf3f0] px-1 font-mono text-[8px] text-danger">
+            <span className="rounded border border-danger/25 bg-danger-soft px-1 font-mono text-[8px] text-danger">
               缺失
             </span>
           ) : null}
@@ -1611,7 +1611,7 @@ function ExtractInspector({
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="size-7 p-0 text-danger hover:bg-[#fdf3f0]"
+                          className="size-7 p-0 text-danger hover:bg-danger-soft"
                           title="删除手动取值"
                           aria-label="删除手动取值"
                           onClick={() => onRemoveManualRow(row.id)}
@@ -1779,7 +1779,7 @@ function VarPanel({
       </div>
 
       {duplicates.length > 0 ? (
-        <p className="mt-2.5 rounded-lg border border-danger/20 bg-[#fdf3f0] px-2.5 py-2 text-[10.5px] leading-4 text-danger">
+        <p className="mt-2.5 rounded-lg border border-danger/20 bg-danger-soft px-2.5 py-2 text-[10.5px] leading-4 text-danger">
           变量重名：{duplicates.join("、")}。同名产出无法编译，请改掉其中一个。
         </p>
       ) : null}

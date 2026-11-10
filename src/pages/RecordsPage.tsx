@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogBody,
@@ -25,7 +24,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -36,7 +34,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { deleteRecord, formatTime, listRecords, listSystems, newId, saveRecord } from "@/lib/store";
 import type { OperationRecord, TargetSystem } from "@/lib/types";
-import { ItemCard, PageHeader } from "../components/ui";
+import { EmptyState, Field, ItemCard, PageHeader } from "../components/ui";
 
 type RecordDraft = Pick<OperationRecord, "name" | "systemId" | "targetUrl" | "description">;
 
@@ -117,8 +115,7 @@ function RecordDialog({
 
         <DialogBody>
           <form id="record-form" className="grid gap-4" onSubmit={submit}>
-            <div className="grid gap-1.5">
-              <Label htmlFor="record-name">记录名称</Label>
+            <Field label="记录名称" htmlFor="record-name">
               <Input
                 id="record-name"
                 value={name}
@@ -126,10 +123,25 @@ function RecordDialog({
                 placeholder="例如：新建客户"
                 autoFocus
               />
-            </div>
+            </Field>
 
-            <div className="grid gap-1.5">
-              <Label htmlFor="record-system">所属系统</Label>
+            <Field
+              label="所属系统"
+              htmlFor="record-system"
+              hint={
+                systems.length === 0 ? (
+                  <>
+                    还没有系统，先到{" "}
+                    <Link className="text-accent underline underline-offset-2" to="/systems">
+                      系统管理
+                    </Link>{" "}
+                    添加，或直接填写目标地址。
+                  </>
+                ) : (
+                  "选择系统后会自动带入目标地址，仍可手动修改。"
+                )
+              }
+            >
               <Select
                 value={systemId || NO_SYSTEM}
                 onValueChange={(value) => selectSystem(value === NO_SYSTEM ? "" : value)}
@@ -146,23 +158,18 @@ function RecordDialog({
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-[11px] leading-4 text-muted">
-                {systems.length === 0 ? (
-                  <>
-                    还没有系统，先到{" "}
-                    <Link className="text-accent underline underline-offset-2" to="/systems">
-                      系统管理
-                    </Link>{" "}
-                    添加，或直接填写目标地址。
-                  </>
-                ) : (
-                  "选择系统后会自动带入目标地址，仍可手动修改。"
-                )}
-              </p>
-            </div>
+            </Field>
 
-            <div className="grid gap-1.5">
-              <Label htmlFor="record-url">目标地址</Label>
+            <Field
+              label="目标地址"
+              htmlFor="record-url"
+              hint={
+                <>
+                  可使用同源路径（如 <span className="font-mono">/tf/demo/customers.html</span>）
+                  直接录制；跨域系统需与开发期代理目标一致。
+                </>
+              }
+            >
               <Input
                 id="record-url"
                 className="font-mono text-[12px]"
@@ -171,24 +178,19 @@ function RecordDialog({
                 placeholder="http://dev.example.com/dashboard"
                 spellCheck={false}
               />
-              <p className="text-[11px] leading-4 text-muted">
-                可使用同源路径（如 <span className="font-mono">/tf/demo/customers.html</span>）
-                直接录制；跨域系统需与开发期代理目标一致。
-              </p>
-            </div>
+            </Field>
 
-            <div className="grid gap-1.5">
-              <Label htmlFor="record-description">说明（可选）</Label>
+            <Field label="说明（可选）" htmlFor="record-description">
               <Textarea
                 id="record-description"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="这条记录覆盖什么操作？"
               />
-            </div>
+            </Field>
 
             {error ? (
-              <div className="flex items-start gap-2 rounded-lg border border-danger/20 bg-[#fdf3f0] px-3 py-2 text-[12px] leading-5 text-danger">
+              <div className="flex items-start gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-[12px] leading-5 text-danger">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -270,7 +272,7 @@ export function RecordsPage() {
   };
 
   return (
-    <div className="pb-10">
+    <div className="flex flex-col gap-4 pb-10">
       <PageHeader
         code="REC / RECORDS"
         title="操作记录"
@@ -284,32 +286,29 @@ export function RecordsPage() {
       />
 
       {records.length === 0 ? (
-        <Card className="mt-5 gap-0 border border-dashed border-line bg-panel/60 p-0 shadow-none">
-          <CardContent className="flex flex-col items-center px-6 py-12 text-center">
-            <div className="grid size-11 place-items-center rounded-[12px] border border-line bg-white font-mono text-[11px] font-semibold tracking-[0.14em] text-accent">
-              REC
-            </div>
-            <h2 className="mt-4 text-[15px] font-semibold tracking-tight">还没有操作记录</h2>
-            <p className="mt-1.5 max-w-[520px] text-[12.5px] leading-5 text-muted">
-              先建立一条记录，随后在录制工作台里打开目标系统，捕获点击、输入、下拉与页面跳转。
-            </p>
-            <Button size="sm" className="mt-5" onClick={openCreate}>
+        <EmptyState
+          code="REC"
+          title="还没有操作记录"
+          description="先建立一条记录，随后在录制工作台里打开目标系统，捕获点击、输入、下拉与页面跳转。"
+          action={
+            <Button size="sm" onClick={openCreate}>
               <Plus />
               新增第一条记录
             </Button>
-            <div className="mt-6 grid w-full max-w-[720px] gap-2 text-left sm:grid-cols-3">
-              {EMPTY_STEPS.map(([code, title, text]) => (
-                <div key={code} className="rounded-xl border border-line bg-white/70 px-3.5 py-3">
-                  <div className="font-mono text-[9.5px] tracking-[0.14em] text-accent">{code}</div>
-                  <div className="mt-1 text-[12.5px] font-semibold">{title}</div>
-                  <div className="mt-0.5 text-[11.5px] leading-4 text-muted">{text}</div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+          }
+        >
+          <div className="mx-auto grid w-full max-w-[720px] gap-2 text-left sm:grid-cols-3">
+            {EMPTY_STEPS.map(([code, title, text]) => (
+              <div key={code} className="rounded-xl border border-line bg-white/70 px-3.5 py-3">
+                <div className="font-mono text-[9.5px] tracking-[0.14em] text-accent">{code}</div>
+                <div className="mt-1 text-[12.5px] font-semibold">{title}</div>
+                <div className="mt-0.5 text-[11.5px] leading-4 text-muted">{text}</div>
+              </div>
+            ))}
+          </div>
+        </EmptyState>
       ) : (
-        <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {records.map((record) => (
             <ItemCard
               key={record.id}

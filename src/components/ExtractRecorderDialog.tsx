@@ -367,7 +367,7 @@ const ExtractRecorderDialog = ({
               </>
             )}
             {error ? (
-              <p className="flex items-start gap-2 rounded-lg border border-danger/20 bg-[#fdf3f0] px-3 py-2 text-[12px] leading-5 text-danger">
+              <p className="flex items-start gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-[12px] leading-5 text-danger">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
                 <span>{error}</span>
               </p>
@@ -437,7 +437,7 @@ const ExtractRecorderDialog = ({
                     ) : null}
                   </div>
                   {error ? (
-                    <p className="m-2 flex items-start gap-2 rounded-lg border border-danger/20 bg-[#fdf3f0] px-3 py-2 text-[12px] leading-5 text-danger">
+                    <p className="m-2 flex items-start gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-[12px] leading-5 text-danger">
                       <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
                       <span>{error}</span>
                     </p>

@@ -1,4 +1,7 @@
-import { useEffect, useId, type ReactNode } from "react";
+import type { ReactNode } from "react";
+
+import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 
 export function PageHeader({
   code,
@@ -12,16 +15,16 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
+    <Card className="flex-row flex-wrap items-end justify-between gap-4 px-5 py-4">
       <div className="min-w-0">
         <span className="tf-kicker">{code}</span>
-        <h1 className="tf-display mt-1 text-[26px] leading-tight">{title}</h1>
+        <h1 className="tf-display mt-1.5 text-[28px] leading-tight">{title}</h1>
         {description ? (
-          <p className="mt-1.5 max-w-[760px] text-[12.5px] leading-5 text-muted">{description}</p>
+          <p className="mt-2 max-w-[860px] text-[12.5px] leading-5 text-muted">{description}</p>
         ) : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-    </header>
+    </Card>
   );
 }
 
@@ -39,17 +42,19 @@ export function ItemCard({
   actions: ReactNode;
 }) {
   return (
-    <article className="tf-panel flex h-full flex-col p-4">
-      <div className="flex items-start justify-between gap-2">
+    <Card className="h-full gap-0 p-0">
+      <div className="flex items-start justify-between gap-2 px-4 pb-2 pt-4">
         <div className="min-w-0">
           {code ? <span className="tf-kicker">{code}</span> : null}
-          <h2 className="mt-1 truncate text-[14px] font-semibold tracking-tight">{title}</h2>
+          <h2 className="mt-1 truncate text-[14.5px] font-semibold tracking-tight">{title}</h2>
         </div>
         {badge}
       </div>
-      <div className="mt-2 flex-1 space-y-1 text-[11.5px] leading-5 text-muted">{children}</div>
-      <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line pt-3">{actions}</div>
-    </article>
+      <div className="flex-1 space-y-1.5 px-4 text-[11.5px] leading-5 text-muted">{children}</div>
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line px-4 py-3">
+        {actions}
+      </div>
+    </Card>
   );
 }
 
@@ -67,7 +72,7 @@ export function EmptyState({
   children?: ReactNode;
 }) {
   return (
-    <section className="tf-empty flex flex-col items-center px-6 py-12 text-center">
+    <Card className="items-center border-dashed bg-panel/60 px-6 py-12 text-center shadow-none">
       <div className="grid h-11 w-11 place-items-center rounded-[12px] border border-line bg-white font-mono text-[11px] font-semibold tracking-[0.14em] text-accent">
         {code}
       </div>
@@ -77,92 +82,28 @@ export function EmptyState({
       ) : null}
       {children ? <div className="mt-6 w-full">{children}</div> : null}
       {action ? <div className="mt-6">{action}</div> : null}
-    </section>
+    </Card>
   );
 }
 
 export function Field({
   label,
   hint,
+  htmlFor,
   children,
 }: {
   label: ReactNode;
   hint?: ReactNode;
+  htmlFor?: string;
   children: ReactNode;
 }) {
   return (
-    <label className="grid gap-1.5">
-      <span className="text-[12px] font-medium text-ink">{label}</span>
+    <div className="grid gap-1.5">
+      <Label htmlFor={htmlFor} className="text-[12px] font-medium text-ink">
+        {label}
+      </Label>
       {children}
-      {hint ? <span className="text-[11px] leading-4 text-muted">{hint}</span> : null}
-    </label>
-  );
-}
-
-export function Dialog({
-  open,
-  title,
-  description,
-  onClose,
-  children,
-  footer,
-}: {
-  open: boolean;
-  title: string;
-  description?: ReactNode;
-  onClose: () => void;
-  children: ReactNode;
-  footer?: ReactNode;
-}) {
-  const titleId = useId();
-
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") onClose();
-    };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  return (
-    <div
-      className="tf-dialog-overlay"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="tf-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-          <div>
-            <h2 id={titleId} className="text-[16px] font-semibold tracking-tight">
-              {title}
-            </h2>
-            {description ? (
-              <p className="mt-1 text-[12px] leading-5 text-muted">{description}</p>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-white text-[16px] leading-none text-muted transition-colors hover:text-ink"
-            aria-label="关闭"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-        <div className="px-5 py-4">{children}</div>
-        {footer ? (
-          <div className="flex justify-end gap-2 border-t border-line px-5 py-3.5">{footer}</div>
-        ) : null}
-      </div>
+      {hint ? <p className="text-[11px] leading-4 text-muted">{hint}</p> : null}
     </div>
   );
 }

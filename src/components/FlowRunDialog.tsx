@@ -167,13 +167,13 @@ const STEP_BADGE: Record<StepStatus, { label: string; variant: BadgeVariant }> =
 
 /** 中性行底 + 状态圆点 + 状态文字；只有执行中/失败用浅色底，其余状态保持安静。 */
 const STEP_TONE: Record<StepStatus, { row: string; dot: string; text: string }> = {
-  pending: { row: "bg-panel", dot: "border border-muted/40", text: "text-[#9a968c]" },
+  pending: { row: "bg-panel", dot: "border border-muted/40", text: "text-muted/70" },
   running: { row: "bg-running/10", dot: "bg-running ring-2 ring-running/20", text: "text-running" },
   pass: { row: "bg-panel", dot: "bg-moss", text: "text-moss" },
   healed: { row: "bg-panel", dot: "bg-amber", text: "text-amber" },
   manual: { row: "bg-panel", dot: "bg-accent", text: "text-accent" },
   fail: { row: "bg-danger/10", dot: "bg-danger ring-2 ring-danger/20", text: "text-danger" },
-  skipped: { row: "bg-panel", dot: "border border-muted/30", text: "text-[#9a968c]" },
+  skipped: { row: "bg-panel", dot: "border border-muted/30", text: "text-muted/70" },
 };
 
 function formatDuration(ms: number): string {
@@ -1020,7 +1020,7 @@ export function FlowRunDialog({
               />
 
               {phase === "intervening" && failure ? (
-                <div className="shrink-0 rounded-2xl border border-danger/20 bg-[#fdf3f0] p-3.5">
+                <div className="shrink-0 rounded-2xl border border-danger/20 bg-danger-soft p-3.5">
                   <div className="flex items-center gap-1.5 text-[12px] font-semibold text-danger">
                     <TriangleAlert className="size-3.5" />
                     节点失败：{failure.name ?? failure.nodeId}
@@ -1258,7 +1258,7 @@ function RunStatusOverview({
         <Badge variant={phaseVariant}>{phaseLabel}</Badge>
       </div>
 
-      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[#e9e6de]">
+      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-ink/10">
         <div
           className="h-full rounded-full bg-running transition-[width] duration-300"
           style={{ width: `${summary.percent}%` }}
@@ -1312,7 +1312,7 @@ function RunMetrics({ summary, dirtyCount }: { summary: RunSummary; dirtyCount: 
           >
             {String(metric.value).padStart(2, "0")}
           </div>
-          <div className="mt-1.5 text-[10px] text-[#9a968c]">{metric.hint}</div>
+          <div className="mt-1.5 text-[10px] text-muted/70">{metric.hint}</div>
         </Card>
       ))}
     </div>
@@ -1331,7 +1331,7 @@ function RunVarsCard({ vars }: { vars: Record<string, unknown> }) {
         {entries.map(([name, value]) => (
           <span key={name} className="rounded-lg bg-paper px-2.5 py-1.5 text-[10.5px] text-ink">
             <span className="font-mono text-muted">{name}</span>
-            <span className="mx-1.5 text-[#c9c4b8]">|</span>
+            <span className="mx-1.5 text-muted/40">|</span>
             {String(value)}
           </span>
         ))}

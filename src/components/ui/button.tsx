@@ -10,21 +10,21 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "border border-ink bg-ink text-panel hover:border-black hover:bg-black",
-        destructive: "border border-danger/25 bg-white text-danger hover:border-danger/45 hover:bg-[#fdf3f0]",
-        outline: "border border-line bg-white text-ink hover:border-ink/30 hover:bg-[#fdfcf9]",
-        secondary: "border border-line bg-[#f1efe8] text-ink hover:bg-[#e9e6dd]",
+        destructive: "border border-danger/25 bg-white text-danger hover:border-danger/45 hover:bg-danger-soft",
+        outline: "border border-line bg-white text-ink hover:border-ink/30 hover:bg-paper/60",
+        secondary: "border border-line bg-paper text-ink hover:bg-line/30",
         ghost: "border border-transparent text-ink hover:bg-accent-soft/60",
         link: "text-accent underline-offset-4 hover:underline",
       },
       size: {
         default: "h-9 px-3.5",
-        sm: "h-7 rounded-[7px] px-2.5 text-[11.5px]",
+        sm: "h-7 rounded-[7px] px-2.5 text-[11.5px] [&_svg:not([class*='size-'])]:size-3.5",
         lg: "h-10 px-5",
       },
     },
     defaultVariants: {
       variant: "default",
-      size: "default",
+      size: "sm",
     },
   },
 );

@@ -576,7 +576,7 @@ export class DomRecorder {
       "inset:0",
       "z-index:2147483647",
       "cursor:crosshair",
-      "background:rgba(193,75,42,0.04)",
+      "background:rgba(27,54,93,0.04)",
     ].join(";");
 
     const highlight = doc.createElement("div");
@@ -586,9 +586,9 @@ export class DomRecorder {
       "z-index:2147483646",
       "pointer-events:none",
       "box-sizing:border-box",
-      "border:2px solid #c14b2a",
+      "border:2px solid #1b365d",
       "border-radius:4px",
-      "background:rgba(193,75,42,0.08)",
+      "background:rgba(27,54,93,0.08)",
       "display:none",
     ].join(";");
 
