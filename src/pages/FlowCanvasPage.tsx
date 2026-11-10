@@ -780,12 +780,9 @@ export function FlowCanvasPage() {
             <ArrowLeft />
             返回流程列表
           </Button>
-          <div className="min-w-0">
-            <span className="tf-kicker">画布</span>
-            <div className="mt-0.5 flex min-w-0 items-center gap-2">
-              <h1 className="tf-display truncate text-[22px] leading-tight">{flow.name}</h1>
-              {compiled.error ? <Badge variant="amber">草稿</Badge> : <Badge variant="moss">可运行</Badge>}
-            </div>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="tf-display truncate text-[22px] leading-tight">{flow.name}</h1>
+            {compiled.error ? <Badge variant="amber">草稿</Badge> : <Badge variant="moss">可运行</Badge>}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

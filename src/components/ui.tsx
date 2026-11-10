@@ -4,12 +4,10 @@ import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 
 export function PageHeader({
-  code,
   title,
   description,
   actions,
 }: {
-  code: string;
   title: string;
   description?: ReactNode;
   actions?: ReactNode;
@@ -17,8 +15,7 @@ export function PageHeader({
   return (
     <Card className="flex-row flex-wrap items-end justify-between gap-4 px-5 py-4">
       <div className="min-w-0">
-        <span className="tf-kicker">{code}</span>
-        <h1 className="tf-display mt-1.5 text-[28px] leading-tight">{title}</h1>
+        <h1 className="tf-display text-[28px] leading-tight">{title}</h1>
         {description ? (
           <p className="mt-2 max-w-[860px] text-[12.5px] leading-5 text-muted">{description}</p>
         ) : null}

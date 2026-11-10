@@ -774,7 +774,6 @@ export function RecordWorkbenchPage() {
             <ArrowLeft />
             返回记录列表
           </Button>
-          <span className="tf-kicker">REC / WORKBENCH</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={phaseBadge.variant}>{phaseBadge.label}</Badge>

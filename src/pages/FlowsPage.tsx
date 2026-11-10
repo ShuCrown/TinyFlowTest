@@ -169,7 +169,6 @@ export function FlowsPage() {
   return (
     <div className="flex flex-col gap-4 pb-10">
       <PageHeader
-        code="FLW / FLOWS"
         title="流程"
         description="流程把多条操作记录串成顺序执行链；画布里的取值节点负责把前一步保存的主键 code 变成环境变量，再注入下一步的筛选与选择。"
         actions={

@@ -15,12 +15,9 @@ export function Shell() {
   return (
     <div className="flex min-h-screen">
       <aside className="sticky top-0 flex h-screen w-[78px] shrink-0 flex-col border-r border-line bg-panel/80 backdrop-blur md:w-[86px]">
-        <div className="flex h-[96px] flex-col items-center justify-center border-b border-line">
+        <div className="flex h-[72px] items-center justify-center border-b border-line">
           <div className="grid h-10 w-10 place-items-center rounded-[11px] bg-ink text-[13px] font-bold tracking-[0.06em] text-panel">
             TF
-          </div>
-          <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.22em] text-accent">
-            tinyflow
           </div>
         </div>
 

@@ -238,7 +238,6 @@ export function SystemsPage() {
   return (
     <div className="flex flex-col gap-4 pb-10">
       <PageHeader
-        code="SYS / SYSTEMS"
         title="系统管理"
         description="维护被测系统的名称、目标地址与登录令牌。令牌仅保存在当前标签页的会话存储，关闭标签页即清除；系统资料仍保存在本地存储。"
         actions={

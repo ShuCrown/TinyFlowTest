@@ -274,7 +274,6 @@ export function RecordsPage() {
   return (
     <div className="flex flex-col gap-4 pb-10">
       <PageHeader
-        code="REC / RECORDS"
         title="操作记录"
         description="一次录制 = 一条记录：打开目标系统，在目标页完成表单填写、下拉选择等操作，停止后自动生成节点并保存。"
         actions={
