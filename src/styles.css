@@ -2,24 +2,25 @@
 @import "tw-animate-css";
 
 @theme {
-  --color-paper: #ebedf2;
+  /* 暖灰纸面：中性色偏暖，去掉水泥冷灰；白卡片保持纯白以提亮、不发闷 */
+  --color-paper: #f3eee6;
   --color-panel: #ffffff;
-  --color-ink: #0f172a;
-  --color-muted: #64748b;
-  --color-line: #d8dee8;
-  /* 品牌/操作色：低彩度墨蓝，与蓝灰中性底同色相咬合，不靠高饱和抢视线 */
-  --color-accent: #2f4c7e;
-  --color-accent-soft: #e8eef9;
+  --color-ink: #2b2721;
+  --color-muted: #6f6350;
+  --color-line: #e6ddcf;
+  /* 品牌/操作色：提亮的丹宁蓝，比深墨蓝明度高、不发暗，保留产品原有的蓝色识别 */
+  --color-accent: #3f6ea8;
+  --color-accent-soft: #e9f0f8;
   --color-moss: #047857;
   --color-moss-soft: #ecfdf5;
   --color-amber: #b45309;
   --color-amber-soft: #fffbeb;
   --color-danger: #b91c1c;
   --color-danger-soft: #fef2f2;
-  /* 执行中：全站唯一的饱和蓝。品牌色已降为墨蓝，这里用高彩度天蓝专指「正在运行」，
-     靠彩度与明度双重差异区分，而非色相；也避免被误读成出错红或普通强调 */
-  --color-running: #0369a1;
-  --color-running-soft: #f0f9ff;
+  /* 执行中：青绿，与蓝色主色靠色相和明度拉开，专指「正在运行」，
+     不会把进行中误读成出错红或普通强调 */
+  --color-running: #0b7079;
+  --color-running-soft: #e6f3f3;
 
   --font-body: "Inter", "Noto Sans SC", "PingFang SC", system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -42,9 +43,8 @@ body,
 body {
   margin: 0;
   color: var(--color-ink);
+  /* 纯暖灰纸面：不加装饰性光晕，光晕几乎不可见还会把暖灰染冷 */
   background-color: var(--color-paper);
-  /* 单一冷调环境光，取代原来的蓝+绿双色光晕：双色相加只见复杂度不见层次 */
-  background-image: radial-gradient(circle at 12% -8%, rgba(47, 76, 126, 0.07), transparent 34%);
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.55;
@@ -52,7 +52,7 @@ body {
 }
 
 ::selection {
-  background: rgba(47, 76, 126, 0.16);
+  background: rgba(63, 110, 168, 0.16);
   color: var(--color-ink);
 }
 
@@ -68,11 +68,11 @@ body {
 ::-webkit-scrollbar-thumb {
   border: 3px solid var(--color-paper);
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.18);
+  background: rgba(44, 38, 32, 0.18);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(15, 23, 42, 0.32);
+  background: rgba(44, 38, 32, 0.32);
 }
 
 @layer components {
@@ -95,7 +95,7 @@ body {
     overflow: hidden;
     border: 1px solid var(--color-line);
     border-radius: 9px;
-    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    box-shadow: 0 4px 16px rgba(44, 38, 32, 0.07);
   }
 
   .tf-flow .react-flow__controls-button {
@@ -114,7 +114,7 @@ body {
     border: 1px solid var(--color-line);
     border-radius: 10px;
     background: #fff;
-    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    box-shadow: 0 4px 16px rgba(44, 38, 32, 0.07);
   }
 
   .tf-flow .react-flow__handle {

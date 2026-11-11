@@ -82,7 +82,7 @@ import {
 import type { ExtractProducer } from "@/flow/vars.ts";
 
 const EMPTY_GRAPH: FlowGraph = { nodes: [], edges: [], injections: [], vars: [] };
-const RECORD_COLOR = "#2f4c7e";
+const RECORD_COLOR = "#3f6ea8";
 const EXTRACT_COLOR = "#047857";
 
 type SlotsMode = "recorded" | "literal" | "var";
@@ -823,7 +823,7 @@ export function FlowCanvasPage() {
           {addOpen ? (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setAddOpen(false)} />
-              <div className="absolute left-0 top-full z-30 mt-1 w-[280px] rounded-xl border border-line bg-panel p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.14)]">
+              <div className="absolute left-0 top-full z-30 mt-1 w-[280px] rounded-xl border border-line bg-panel p-1.5 shadow-[0_18px_50px_rgba(44,38,32,0.14)]">
                 <button
                   type="button"
                   className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-accent-soft/40"
@@ -989,7 +989,7 @@ export function FlowCanvasPage() {
               defaultEdgeOptions={{ type: "smoothstep" }}
               proOptions={{ hideAttribution: true }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#cbd5e1" />
+              <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#dcd2c0" />
               <Controls position="bottom-left" showInteractive={false} />
               <MiniMap
                 position="bottom-right"
@@ -1000,7 +1000,7 @@ export function FlowCanvasPage() {
                   const data = node.data as FlowNodeData | undefined;
                   return data?.node.kind === "extract" ? EXTRACT_COLOR : RECORD_COLOR;
                 }}
-                maskColor="rgba(235, 237, 242, 0.75)"
+                maskColor="rgba(243, 238, 230, 0.75)"
               />
               {graph.nodes.length === 0 ? (
                 <div className="pointer-events-none absolute inset-0 grid place-items-center px-8 text-center">

@@ -46,7 +46,7 @@ export function ItemCard({
   actions: ReactNode;
 }) {
   return (
-    <Card className="h-full gap-0 p-0 transition-shadow hover:shadow-[0_4px_20px_-2px_rgba(15,23,42,0.08)]">
+    <Card className="h-full gap-0 p-0 transition-shadow hover:shadow-[0_4px_20px_-2px_rgba(44,38,32,0.08)]">
       <div className="flex items-start justify-between gap-2 px-4 pb-2 pt-4">
         <div className="min-w-0">
           {code ? <span className="tf-kicker">{code}</span> : null}

@@ -576,7 +576,7 @@ export class DomRecorder {
       "inset:0",
       "z-index:2147483647",
       "cursor:crosshair",
-      "background:rgba(47,76,126,0.04)",
+      "background:rgba(63,110,168,0.04)",
     ].join(";");
 
     const highlight = doc.createElement("div");
@@ -586,9 +586,9 @@ export class DomRecorder {
       "z-index:2147483646",
       "pointer-events:none",
       "box-sizing:border-box",
-      "border:2px solid #2f4c7e",
+      "border:2px solid #3f6ea8",
       "border-radius:4px",
-      "background:rgba(47,76,126,0.08)",
+      "background:rgba(63,110,168,0.08)",
       "display:none",
     ].join(";");
 
@@ -604,10 +604,10 @@ export class DomRecorder {
       "pointer-events:none",
       "padding:6px 14px",
       "border-radius:999px",
-      "background:#1f2937",
+      "background:#2c2620",
       "color:#fff",
       "font:12px/1.5 system-ui, sans-serif",
-      "box-shadow:0 8px 24px rgba(15,23,42,0.28)",
+      "box-shadow:0 8px 24px rgba(44,38,32,0.28)",
       "white-space:nowrap",
     ].join(";");
 
