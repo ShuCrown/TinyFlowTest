@@ -855,8 +855,8 @@ export function FlowCanvasPage() {
                             className={cn(
                               "max-w-full truncate rounded-full border px-2 py-0.5 text-[10.5px] leading-4 transition-colors",
                               active
-                                ? "border-ink bg-ink font-medium text-panel"
-                                : "border-line bg-white text-muted hover:border-ink/25 hover:text-ink",
+                                ? "border-accent bg-accent font-medium text-white"
+                                : "border-line bg-white text-muted hover:border-accent/40 hover:text-accent",
                             )}
                           >
                             {option.name}
@@ -1131,13 +1131,16 @@ export function FlowCanvasPage() {
 function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
   const { node } = data;
   const accent = node.kind === "extract" ? EXTRACT_COLOR : RECORD_COLOR;
+  const typeChip =
+    node.kind === "extract"
+      ? "border-moss/30 bg-moss-soft text-moss"
+      : "border-accent/30 bg-accent-soft text-accent";
   return (
     <Card
       className={cn(
-        "relative w-[240px] p-0 text-left transition-shadow",
+        "relative w-[264px] p-0 text-left transition-shadow",
         data.disabled ? "opacity-50" : "",
       )}
-      style={{ borderLeft: `3px solid ${accent}` }}
     >
       <Handle
         type="target"
@@ -1145,10 +1148,12 @@ function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
         style={{ width: 8, height: 8, background: "#fff", borderColor: accent }}
       />
       <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
           <span
-            className="font-mono text-[10px] font-semibold tracking-[0.16em]"
-            style={{ color: accent }}
+            className={cn(
+              "rounded-md border px-1.5 py-px font-mono text-[9px] font-semibold tracking-[0.1em]",
+              typeChip,
+            )}
           >
             {node.kind === "record" ? "记录" : "取值"}
           </span>
@@ -1173,7 +1178,10 @@ function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
         </div>
       </div>
       <div className="px-3 py-2.5">
-        <div className="break-words text-[14.5px] font-medium leading-tight text-ink">
+        <div
+          className="break-words text-[14.5px] font-medium leading-tight text-ink"
+          title={data.title}
+        >
           {data.title}
         </div>
         <div className="mt-1 break-words font-mono text-[10.5px] text-muted">{data.summary}</div>
@@ -1485,7 +1493,7 @@ function ExtractInspector({
         <InspectorTitle
           icon={<Variable className="size-4 shrink-0 text-moss" />}
           code="取值节点"
-          title={node.name || node.id}
+          title={primaryExtractName(graph, node) || node.id}
         />
         <p className="mt-1.5 text-[11px] leading-4 text-muted">
           在弹窗里录制真实操作和取值步骤；每个取值会生成一个环境变量。
