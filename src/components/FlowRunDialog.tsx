@@ -603,8 +603,6 @@ export function FlowRunDialog({
     const settled = done + failed;
     return {
       total,
-      done,
-      failed,
       elapsedMs,
       tunable: executionSteps.filter((step) => step.tunable).length,
       currentStep:
@@ -1078,6 +1076,7 @@ export function FlowRunDialog({
                 phaseVariant={phaseVariant}
                 statusText={statusText}
                 summary={runSummary}
+                vars={vars}
                 filter={stepFilter}
                 onFilterChange={setStepFilter}
               />
@@ -1202,8 +1201,6 @@ export function FlowRunDialog({
                 </div>
               ) : null}
 
-              <RunMetrics summary={runSummary} dirtyCount={dirtyIds.size} />
-
               <RunStepsPanel
                 steps={executionSteps}
                 itemMap={itemMap}
@@ -1225,8 +1222,6 @@ export function FlowRunDialog({
                   else stepRefs.current.delete(microId);
                 }}
               />
-
-              <RunVarsCard vars={vars} />
 
               <Card className="shrink-0">
                 <div className="flex items-center justify-between gap-2">
@@ -1319,8 +1314,6 @@ export function FlowRunDialog({
 
 interface RunSummary {
   total: number;
-  done: number;
-  failed: number;
   elapsedMs: number;
   tunable: number;
   currentStep: number;
@@ -1369,6 +1362,7 @@ function RunStatusOverview({
   phaseVariant,
   statusText,
   summary,
+  vars,
   filter,
   onFilterChange,
 }: {
@@ -1376,9 +1370,11 @@ function RunStatusOverview({
   phaseVariant: BadgeVariant;
   statusText: string;
   summary: RunSummary;
+  vars: Record<string, unknown>;
   filter: "all" | "tunable";
   onFilterChange: (filter: "all" | "tunable") => void;
 }) {
+  const varEntries = Object.entries(vars);
   return (
     <Card className="shrink-0">
       <div className="flex items-center justify-between gap-2">
@@ -1419,72 +1415,24 @@ function RunStatusOverview({
       {summary.currentLabel ? (
         <p className="mt-1 break-words text-[10.5px] leading-4 text-muted">{statusText}</p>
       ) : null}
-    </Card>
-  );
-}
-
-function RunMetrics({ summary, dirtyCount }: { summary: RunSummary; dirtyCount: number }) {
-  const metrics = [
-    {
-      label: "已完成",
-      value: summary.done,
-      hint: "节点",
-      tone: "text-moss",
-    },
-    {
-      label: "失败",
-      value: summary.failed,
-      hint: summary.failed > 0 ? "需介入" : "无需介入",
-      tone: summary.failed > 0 ? "text-danger" : "text-muted",
-    },
-    {
-      label: "可微调",
-      value: dirtyCount > 0 ? dirtyCount : summary.tunable,
-      hint: dirtyCount > 0 ? "处已调" : "处待改值",
-      tone: "text-amber",
-    },
-  ];
-  return (
-    <div className="grid shrink-0 grid-cols-[1.85fr_1fr_1fr] gap-2.5">
-      {metrics.map((metric) => (
-        <Card key={metric.label} className="p-3">
-          <div className="text-[10.5px] text-muted">{metric.label}</div>
-          <div
-            className={cn(
-              "mt-1 text-[26px] font-bold leading-none tabular-nums",
-              metric.tone,
-            )}
-          >
-            {String(metric.value).padStart(2, "0")}
-          </div>
-          <div className="mt-1.5 text-[10px] text-muted/70">{metric.hint}</div>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-function RunVarsCard({ vars }: { vars: Record<string, unknown> }) {
-  const entries = Object.entries(vars);
-  if (entries.length === 0) return null;
-  return (
-    <Card className="shrink-0">
-      <div className="flex items-center gap-1.5 font-mono text-[10px] font-semibold tracking-[0.1em] text-muted">
-        <Variable className="size-3.5 text-accent" />
-        运行变量
-      </div>
-      <div className="mt-2.5 flex flex-wrap gap-2">
-        {entries.map(([name, value]) => (
-          <span key={name} className="rounded-lg bg-paper px-2.5 py-1.5 text-[10.5px] text-ink">
-            <span className="font-mono text-muted">{name}</span>
-            <span className="mx-1.5 text-muted/40">|</span>
-            {String(value)}
+      {varEntries.length > 0 ? (
+        <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-line pt-2.5">
+          <span className="flex shrink-0 items-center gap-1 font-mono text-[10px] font-semibold tracking-[0.1em] text-muted">
+            <Variable className="size-3.5 text-accent" />
+            运行变量
           </span>
-        ))}
-      </div>
-      <p className="mt-2.5 text-[10.5px] leading-4 text-muted">
-        取值节点产出的变量会注入下一条记录的筛选值。
-      </p>
+          {varEntries.map(([name, value]) => (
+            <span
+              key={name}
+              className="min-w-0 max-w-full rounded-lg bg-paper px-2.5 py-1 text-[10.5px] text-ink"
+            >
+              <span className="font-mono text-muted">{name}</span>
+              <span className="mx-1.5 text-muted/40">|</span>
+              <span className="break-all">{String(value)}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
     </Card>
   );
 }
