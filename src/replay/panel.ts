@@ -6,6 +6,7 @@ import {
   selectorsForZone,
   type PanelRule,
 } from "../dsl/panel-rules.ts";
+import { interruptOf } from "./interrupts.ts";
 
 /**
  * 面板绑定与开合谓词。
@@ -117,13 +118,14 @@ export async function waitForPanel(
   timeoutMs: number,
   /** 每轮重读触发器契约：aria-controls 可能由组件在点击后异步挂载。 */
   livePopupId?: () => string | null,
+  signal?: AbortSignal,
 ): Promise<PanelResolution | null> {
   const deadline = Date.now() + timeoutMs;
   do {
     const found = resolvePanel(doc, node, selector, livePopupId?.());
     if (found) return found;
     if (Date.now() >= deadline) return null;
-    await delay(POLL_MS);
+    await delay(POLL_MS, signal);
   } while (true);
 }
 
@@ -131,12 +133,13 @@ export async function waitForPanel(
 export async function waitForPanelClosed(
   panel: Element,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   do {
     if (!isVisible(panel)) return true;
     if (Date.now() >= deadline) return false;
-    await delay(POLL_MS);
+    await delay(POLL_MS, signal);
   } while (true);
 }
 
@@ -166,6 +169,18 @@ export function itemSelectorsOf(rule: PanelRule | undefined, byRow: boolean): st
   return selectorsForZone(rule, byRow);
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+  if (signal.aborted) return Promise.reject(interruptOf(signal.reason));
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(interruptOf(signal.reason));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }

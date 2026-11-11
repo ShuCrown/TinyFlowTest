@@ -2,15 +2,16 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   Check,
+  CirclePause,
   FileJson,
   ListOrdered,
-  Loader2,
   Pause,
   Play,
   RefreshCw,
   RotateCcw,
   SkipForward,
   SlidersHorizontal,
+  Square,
   TriangleAlert,
   Variable,
   X,
@@ -47,9 +48,22 @@ import {
 } from "@/lib/proxy";
 import { injectSystemToken } from "@/lib/session";
 import { compileFlow } from "@/flow/compile.ts";
-import { createIframeHost, runFlow, type ReplayNodeStatus } from "@/replay/index.ts";
-import type { CapturedHttpResponse, IframeHost, NodeFailureDecision, NodeFailureInfo } from "@/replay/index.ts";
-import type { ExtractNode, FlowNode, InteractNode, PickerNode, ValueLike } from "@/dsl/index.ts";
+import { createIframeHost, RunController, type ReplayNodeStatus } from "@/replay/index.ts";
+import type {
+  CapturedHttpResponse,
+  IframeHost,
+  InterventionRequest,
+  StepAttemptRecord,
+} from "@/replay/index.ts";
+import type {
+  ExtractNode,
+  FailureKind,
+  FlowDsl,
+  FlowNode,
+  InteractNode,
+  PickerNode,
+  ValueLike,
+} from "@/dsl/index.ts";
 import type { FlowItem, OperationRecord } from "@/lib/types";
 import { effectiveExtractName } from "@/flow/vars";
 import {
@@ -77,6 +91,11 @@ interface RunItem {
   status: "running" | ReplayNodeStatus;
   message: string;
   durationMs?: number;
+  /** 该节点全部执行尝试；重试后用于展示尝试时间线。 */
+  attempts?: StepAttemptRecord[];
+  failureKind?: FailureKind;
+  /** 自动重试次数（不含首次）。 */
+  retries?: number;
 }
 
 type PickerStrategy = "byText" | "byRow" | "byIndex" | "firstVisible";
@@ -166,6 +185,21 @@ const ITEM_BADGE: Record<RunItem["status"], { label: string; variant: BadgeVaria
 const STEP_BADGE: Record<StepStatus, { label: string; variant: BadgeVariant }> = {
   pending: { label: "待执行", variant: "secondary" },
   ...ITEM_BADGE,
+};
+
+const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
+  "not-executed": "未执行",
+  partial: "部分已提交",
+  unknown: "状态未知",
+  assertion: "校验失败",
+  interrupted: "被暂停中断",
+};
+
+const ATTEMPT_STATUS_LABEL: Record<StepAttemptRecord["status"], string> = {
+  passed: "通过",
+  healed: "自愈",
+  failed: "失败",
+  interrupted: "中断",
 };
 
 /** 中性行底 + 状态圆点 + 状态文字；只有执行中/失败用浅色底，其余状态保持安静。 */
@@ -383,21 +417,19 @@ export function FlowRunDialog({
   onClose: () => void;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const controllerRef = useRef<RunController | null>(null);
   const hostRef = useRef<IframeHost | null>(null);
   const apiTimerRef = useRef<number | undefined>(undefined);
   const apiSignatureRef = useRef("");
-  const pausedRef = useRef(false);
-  const resumeRef = useRef<(() => void) | null>(null);
-  const interventionRef = useRef<((decision: NodeFailureDecision) => void) | null>(null);
   const runtimeValuesRef = useRef<Record<string, unknown> | null>(null);
   const [phase, setPhase] = useState<RunPhase>("idle");
   const [statusText, setStatusText] = useState("点「开始运行」加载目标页并按画布顺序执行。");
   const [items, setItems] = useState<RunItem[]>([]);
   const [apiCalls, setApiCalls] = useState<ApiCallEntry[]>([]);
   const [vars, setVars] = useState<Record<string, unknown>>({});
-  const [failure, setFailure] = useState<NodeFailureInfo | null>(null);
+  const [failure, setFailure] = useState<InterventionRequest | null>(null);
   const [extractValue, setExtractValue] = useState("");
+  const [verifyOnContinue, setVerifyOnContinue] = useState(true);
   const [frameUrl, setFrameUrl] = useState("");
   const [proxyConfig, setProxyConfig] = useState<ProxyConfig | null>(null);
   const [inputTuning, setInputTuning] = useState<Record<string, string>>({});
@@ -543,6 +575,15 @@ export function FlowRunDialog({
       ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [activeMicroId]);
 
+  /** 失败节点所属画布分组：有分组才显示「重试本组」。 */
+  const currentFailureGroupId = useMemo(() => {
+    if (!failure) return undefined;
+    return executionSteps.find((step) => step.microId === failure.nodeId)?.groupId;
+  }, [failure, executionSteps]);
+
+  /** 运行以失败/取消收尾时，尚未执行的步骤标记为「已阻断」。 */
+  const blockedMode = phase === "failed" || (phase === "idle" && items.length > 0);
+
   const runSummary = useMemo(() => {
     const total = executionSteps.length;
     let done = 0;
@@ -681,13 +722,9 @@ export function FlowRunDialog({
 
   useEffect(() => {
     if (!open) {
-      pausedRef.current = false;
-      resumeRef.current?.();
-      resumeRef.current = null;
-      interventionRef.current?.({ action: "stop" });
-      interventionRef.current = null;
+      controllerRef.current?.stop();
+      controllerRef.current = null;
       runtimeValuesRef.current = null;
-      abortRef.current?.abort();
       disposeRunHost();
       reset();
     }
@@ -695,53 +732,68 @@ export function FlowRunDialog({
 
   useEffect(
     () => () => {
-      pausedRef.current = false;
-      resumeRef.current?.();
-      resumeRef.current = null;
-      interventionRef.current?.({ action: "stop" });
-      interventionRef.current = null;
-      abortRef.current?.abort();
+      controllerRef.current?.stop();
+      controllerRef.current = null;
       disposeRunHost();
     },
     [],
   );
 
   const stop = (): void => {
-    pausedRef.current = false;
-    resumeRef.current?.();
-    resumeRef.current = null;
-    interventionRef.current?.({ action: "stop" });
-    interventionRef.current = null;
-    abortRef.current?.abort();
+    controllerRef.current?.stop();
   };
 
   const pause = (): void => {
     if (phase !== "running") return;
-    pausedRef.current = true;
-    setStatusText("已请求暂停，当前节点结束后停下。");
+    controllerRef.current?.send({ action: "pause", mode: "after-step" });
+    setStatusText("已请求暂停：当前节点结束后停下，可在下方改值。");
+  };
+
+  const pauseNow = (): void => {
+    if (phase !== "running") return;
+    controllerRef.current?.send({ action: "pause", mode: "immediate" });
+    setStatusText("正在立即暂停：中断当前等待后进入人工处理。");
   };
 
   const resume = (): void => {
-    pausedRef.current = false;
-    resumeRef.current?.();
-    resumeRef.current = null;
+    controllerRef.current?.send({ action: "resume" });
     setPhase("running");
     setStatusText("运行中…");
   };
 
-  const decideIntervention = (decision: NodeFailureDecision): void => {
-    const resolve = interventionRef.current;
-    if (!resolve) return;
-    interventionRef.current = null;
-    resolve(decision);
+  const decideIntervention = (action: "retry" | "retryGroup" | "skip" | "stop"): void => {
+    setFailure(null);
+    setExtractValue("");
+    if (action === "stop") {
+      setStatusText("正在停止运行…");
+      controllerRef.current?.send({ action: "stop" });
+      return;
+    }
+    setPhase("running");
+    if (action === "retryGroup") {
+      setStatusText("正在从分组入口重试…");
+      controllerRef.current?.send({ action: "retry", scope: "group" });
+      return;
+    }
+    if (action === "retry") setStatusText("正在重试失败节点…");
+    else setStatusText("已跳过失败节点，继续执行…");
+    controllerRef.current?.send({ action });
   };
 
   const continueAfterManual = (): void => {
     const name = failure?.varName;
     const value = extractValue.trim();
-    decideIntervention(
-      name && value ? { action: "continue", vars: { [name]: value } } : { action: "continue" },
+    setPhase("running");
+    setStatusText(
+      verifyOnContinue ? "已按人工补全继续，正在校验 expect…" : "已按人工补全继续执行…",
     );
+    controllerRef.current?.send({
+      action: "continue",
+      ...(name && value ? { vars: { [name]: value } } : {}),
+      verify: verifyOnContinue,
+    });
+    setFailure(null);
+    setExtractValue("");
   };
 
   const start = async (): Promise<void> => {
@@ -751,8 +803,7 @@ export function FlowRunDialog({
 
     reset();
     disposeRunHost();
-    pausedRef.current = false;
-    resumeRef.current = null;
+    controllerRef.current = null;
     setPhase("loading");
     setStatusText("正在编译画布并加载目标系统…");
     const compiled = compiledState.value;
@@ -793,13 +844,12 @@ export function FlowRunDialog({
       host.startNetworkCapture?.();
       setApiCalls([]);
       startApiPolling(host);
-      const controller = new AbortController();
-      abortRef.current = controller;
       setPhase("running");
       setStatusText("运行中…");
       setItems([]);
 
-      const dsl = {
+      // 节点副本：不再携带按步断点的运行期覆盖，执行顺序完全由画布决定。
+      const dsl: FlowDsl = {
         ...compiled.dsl,
         systems: compiled.dsl.systems.map((system) => ({
           ...system,
@@ -823,48 +873,11 @@ export function FlowRunDialog({
         else delete runValues[microNodeId];
       }
       runtimeValuesRef.current = runValues;
-      const result = await runFlow({
+      const controller = new RunController({
         dsl,
         host,
         values: runValues,
         vars: compiled.vars,
-        signal: controller.signal,
-        onBeforeNode: async () => {
-          if (!pausedRef.current) return;
-          setPhase("paused");
-          setStatusText("已暂停：可在下方待执行步骤里改值，完成后点「继续」。");
-          await new Promise<void>((resolve) => {
-            resumeRef.current = resolve;
-          });
-          resumeRef.current = null;
-          setPhase("running");
-          setStatusText("运行中…");
-        },
-        onNodeError: async (info) => {
-          setFailure(info);
-          setExtractValue("");
-          setPhase("intervening");
-          setStatusText(
-            `节点失败：${info.name ?? info.nodeId}。可在目标页手动补全这一步，再选择继续、重试或跳过。`,
-          );
-          const decision = await new Promise<NodeFailureDecision>((resolve) => {
-            interventionRef.current = resolve;
-          });
-          interventionRef.current = null;
-          setFailure(null);
-          setExtractValue("");
-          if (decision.action === "retry") {
-            setPhase("running");
-            setStatusText("正在重试失败节点…");
-          } else if (decision.action === "skip") {
-            setPhase("running");
-            setStatusText("已跳过失败节点，继续执行…");
-          } else if (decision.action === "continue") {
-            setPhase("running");
-            setStatusText("已按人工补全继续执行…");
-          }
-          return decision;
-        },
         onEvent: (event) => {
           if (event.type === "run.started") {
             setStatusText(`运行中 · 0/${event.totalNodes} 节点`);
@@ -881,7 +894,7 @@ export function FlowRunDialog({
                         name: event.name,
                         groupId: event.groupId,
                         status: "running",
-                        message: "执行中…",
+                        message: event.attempt > 1 ? `第 ${event.attempt} 次尝试…` : "执行中…",
                         durationMs: undefined,
                       }
                     : item,
@@ -894,21 +907,39 @@ export function FlowRunDialog({
                   name: event.name,
                   groupId: event.groupId,
                   status: "running",
-                  message: "执行中…",
+                  message: event.attempt > 1 ? `第 ${event.attempt} 次尝试…` : "执行中…",
                 },
               ];
             });
             return;
           }
-          if (event.type === "node.finished") {
+          if (event.type === "node.attempt") {
             setItems((current) =>
               current.map((item) =>
-                item.nodeId === event.node.nodeId
+                item.nodeId === event.nodeId
                   ? {
                       ...item,
-                      status: event.node.status,
-                      message: event.node.message,
-                      durationMs: event.node.durationMs,
+                      attempts: [...(item.attempts ?? []), event.attempt],
+                      retries: Math.max(0, (item.attempts?.length ?? 0)),
+                    }
+                  : item,
+              ),
+            );
+            return;
+          }
+          if (event.type === "node.finished") {
+            const node = event.node;
+            setItems((current) =>
+              current.map((item) =>
+                item.nodeId === node.nodeId
+                  ? {
+                      ...item,
+                      status: node.status,
+                      message: node.message,
+                      durationMs: node.durationMs,
+                      attempts: node.attempts ?? item.attempts,
+                      failureKind: node.failureKind,
+                      retries: Math.max(0, (node.attempts?.length ?? 1) - 1),
                     }
                   : item,
               ),
@@ -919,8 +950,38 @@ export function FlowRunDialog({
             setVars((current) => ({ ...current, [event.name]: event.value }));
             return;
           }
+          if (event.type === "run.paused") {
+            setPhase("paused");
+            setStatusText(
+              event.mode === "immediate"
+                ? "已立即暂停：请在下方选择重试、补全或跳过。"
+                : "已暂停：可在下方待执行步骤里改值，完成后点「继续」。",
+            );
+            return;
+          }
+          if (event.type === "run.resumed") {
+            setPhase("running");
+            setStatusText("运行中…");
+            return;
+          }
+          if (event.type === "run.intervening") {
+            setFailure(event.request);
+            setExtractValue("");
+            setPhase("intervening");
+            setStatusText(
+              `节点失败：${event.request.name ?? event.request.nodeId}。可在目标页手动补全这一步，再选择继续、重试、重试本组或跳过。`,
+            );
+            return;
+          }
+          if (event.type !== "run.finished") return;
           setFailure(null);
-          setPhase(event.status === "finished" ? "finished" : "failed");
+          setPhase(
+            event.status === "finished"
+              ? "finished"
+              : event.status === "canceled"
+                ? "idle"
+                : "failed",
+          );
           setStatusText(
             event.status === "finished"
               ? `完成 · ${event.passed}/${event.total} 节点通过`
@@ -928,6 +989,8 @@ export function FlowRunDialog({
           );
         },
       });
+      controllerRef.current = controller;
+      const result = await controller.start();
       setVars(result.vars);
       if (result.status !== "canceled") {
         setPhase(result.status === "finished" ? "finished" : "failed");
@@ -946,10 +1009,7 @@ export function FlowRunDialog({
     } finally {
       // 不在这里 dispose：提交接口的响应常在最后一个节点结束后才回来，
       // 保留宿主与轮询，等响应回填状态；关闭弹窗或下次运行时再统一释放。
-      abortRef.current = null;
       runtimeValuesRef.current = null;
-      pausedRef.current = false;
-      resumeRef.current = null;
     }
   };
 
@@ -1024,15 +1084,53 @@ export function FlowRunDialog({
 
               {phase === "intervening" && failure ? (
                 <div className="shrink-0 rounded-2xl border border-danger/20 bg-danger-soft p-3.5">
-                  <div className="flex items-center gap-1.5 text-[12px] font-semibold text-danger">
+                  <div className="flex flex-wrap items-center gap-1.5 text-[12px] font-semibold text-danger">
                     <TriangleAlert className="size-3.5" />
                     节点失败：{failure.name ?? failure.nodeId}
+                    <Badge variant="destructive">{FAILURE_KIND_LABEL[failure.failureKind]}</Badge>
+                    {failure.mayHaveSideEffect ? (
+                      <Badge variant="amber">可能已提交</Badge>
+                    ) : null}
                   </div>
                   <p className="mt-1 break-words font-mono text-[10.5px] leading-4 text-danger/80">
                     {failure.message}
                   </p>
-                  <p className="mt-1.5 text-[11px] leading-4 text-muted">
-                    可直接在左侧目标页手动完成这一步，然后点「已补全，继续」。继续不会重复执行该节点。
+                  <p className="mt-1 flex flex-wrap items-center gap-1 text-[10px] leading-4 text-muted">
+                    <span>
+                      第 {failure.attempt} 次尝试
+                      {failure.maxAttempts > 1 ? ` / 上限 ${failure.maxAttempts} 次` : ""}
+                    </span>
+                    {failure.retryExhausted ? <Badge variant="secondary">自动重试已用完</Badge> : null}
+                  </p>
+                  {failure.attempts.length > 0 ? (
+                    <ol className="mt-2 grid gap-1 border-t border-danger/15 pt-2">
+                      {failure.attempts.map((attempt) => (
+                        <li
+                          key={`${attempt.attempt}-${attempt.startedAt}`}
+                          className="flex items-start gap-1.5 text-[10px] leading-4"
+                        >
+                          <span className="w-8 shrink-0 font-mono text-muted">#{attempt.attempt}</span>
+                          <span
+                            className={cn(
+                              "w-9 shrink-0 font-medium",
+                              attempt.status === "failed" ? "text-danger" : "text-muted",
+                            )}
+                          >
+                            {ATTEMPT_STATUS_LABEL[attempt.status]}
+                          </span>
+                          <span className="w-12 shrink-0 font-mono text-muted">
+                            {attempt.durationMs}ms
+                          </span>
+                          <span className="min-w-0 flex-1 break-words text-muted/80">
+                            {attempt.message ?? "—"}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
+                  <p className="mt-2 text-[11px] leading-4 text-muted">
+                    可直接在左侧目标页手动完成这一步，然后点「已补全，继续」。继续不会重复执行该节点
+                    {verifyOnContinue ? "，但会重新校验本节点的 expect 条件" : ""}。
                   </p>
                   {failure.varName ? (
                     <div className="mt-2">
@@ -1047,6 +1145,15 @@ export function FlowRunDialog({
                       />
                     </div>
                   ) : null}
+                  <label className="mt-2 flex items-center gap-1.5 text-[10.5px] text-muted">
+                    <input
+                      type="checkbox"
+                      className="size-3 accent-current"
+                      checked={verifyOnContinue}
+                      onChange={(event) => setVerifyOnContinue(event.target.checked)}
+                    />
+                    继续前重新校验 expect（推荐）
+                  </label>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <Button size="sm" onClick={continueAfterManual}>
                       <Check />
@@ -1055,22 +1162,42 @@ export function FlowRunDialog({
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => decideIntervention({ action: "retry" })}
+                      onClick={() => decideIntervention("retry")}
                     >
                       <RefreshCw />
-                      重试节点
+                      重试本步
                     </Button>
+                    {currentFailureGroupId ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => decideIntervention("retryGroup")}
+                      >
+                        <RotateCcw />
+                        重试本组
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => decideIntervention({ action: "skip" })}
+                      onClick={() => decideIntervention("skip")}
                     >
                       <SkipForward />
                       跳过节点
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-danger"
+                      onClick={() => decideIntervention("stop")}
+                    >
+                      <Square />
+                      停止运行
+                    </Button>
                   </div>
                   <p className="mt-1.5 text-[10px] leading-4 text-muted">
                     重试会再次执行该节点；若已手动提交，可能产生重复操作。
+                    {currentFailureGroupId ? "「重试本组」会从该分组入口重新执行。" : ""}
                   </p>
                 </div>
               ) : null}
@@ -1088,6 +1215,7 @@ export function FlowRunDialog({
                 valueOverrides={compiledState.value?.values ?? {}}
                 injectionLabels={injectionLabels}
                 filter={stepFilter}
+                blocked={blockedMode}
                 onInputChange={setInputTuningValue}
                 onPickerChange={patchPickerTuning}
                 onPickerReset={resetPickerTuning}
@@ -1148,18 +1276,31 @@ export function FlowRunDialog({
                     继续
                   </Button>
                 ) : phase === "intervening" ? null : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={pause}
-                    disabled={phase !== "running"}
-                  >
-                    <Pause />
-                    暂停
-                  </Button>
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={pause}
+                      disabled={phase !== "running"}
+                      title="当前节点执行完再停下，不会打断已发出的动作"
+                    >
+                      <Pause />
+                      本步后暂停
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={pauseNow}
+                      disabled={phase !== "running"}
+                      title="立即中止当前等待，交由人工确认后重跑或跳过"
+                    >
+                      <CirclePause />
+                      立即暂停
+                    </Button>
+                  </>
                 )}
                 <Button size="sm" variant="destructive" onClick={stop}>
-                  <Loader2 className="animate-spin" />
+                  <Square />
                   停止
                 </Button>
               </>
@@ -1359,6 +1500,7 @@ interface RunStepsPanelProps {
   valueOverrides: Record<string, unknown>;
   injectionLabels: Map<string, string>;
   filter: "all" | "tunable";
+  blocked: boolean;
   onInputChange: (microNodeId: string, value: string) => void;
   onPickerChange: (
     microNodeId: string,
@@ -1385,6 +1527,7 @@ function RunStepsPanel({
   valueOverrides,
   injectionLabels,
   filter,
+  blocked,
   onInputChange,
   onPickerChange,
   onPickerReset,
@@ -1453,6 +1596,7 @@ function RunStepsPanel({
                     extractValues={extractValues}
                     valueOverrides={valueOverrides}
                     injectionLabels={injectionLabels}
+                    blocked={blocked && !itemMap.get(step.microId)}
                     onInputChange={onInputChange}
                     onPickerChange={onPickerChange}
                     onPickerReset={onPickerReset}
@@ -1519,6 +1663,7 @@ function RunStepCard({
   extractValues,
   valueOverrides,
   injectionLabels,
+  blocked,
   onInputChange,
   onPickerChange,
   onPickerReset,
@@ -1534,6 +1679,8 @@ function RunStepCard({
   extractValues: Record<string, ExtractEditor>;
   valueOverrides: Record<string, unknown>;
   injectionLabels: Map<string, string>;
+  /** 运行提前结束，这一行不会再执行。 */
+  blocked: boolean;
   onInputChange: (microNodeId: string, value: string) => void;
   onPickerChange: (
     microNodeId: string,
@@ -1563,6 +1710,8 @@ function RunStepCard({
   const extractNode = node.type === "extract" ? node : null;
 
   const tone = STEP_TONE[status];
+  const retries = item?.retries ?? 0;
+  const uncertain = item?.failureKind === "partial" || item?.failureKind === "unknown";
 
   return (
     <li
@@ -1577,6 +1726,7 @@ function RunStepCard({
           : "border-line",
         tone.row,
         status === "skipped" && "opacity-70",
+        blocked && "opacity-60",
       )}
     >
       <div className="flex items-start gap-1.5">
@@ -1595,11 +1745,18 @@ function RunStepCard({
             </span>
             {dirty ? <Badge variant="amber">已调</Badge> : null}
             <span className={cn("shrink-0 text-[10px] font-medium", tone.text)}>
-              {STEP_BADGE[status].label}
+              {blocked ? "已阻断" : STEP_BADGE[status].label}
             </span>
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1">
             {node.enabled === false ? <Badge variant="amber">已禁用</Badge> : null}
+            {retries > 0 ? <Badge variant="secondary">重试 {retries} 次</Badge> : null}
+            {uncertain ? <Badge variant="amber">可能已提交</Badge> : null}
+            {item?.failureKind ? (
+              <span className="font-mono text-[9.5px] text-muted">
+                {FAILURE_KIND_LABEL[item.failureKind]}
+              </span>
+            ) : null}
             {item?.durationMs !== undefined ? (
               <span className="font-mono text-[9.5px] text-muted">{item.durationMs}ms</span>
             ) : null}

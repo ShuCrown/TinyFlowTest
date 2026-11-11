@@ -3,6 +3,7 @@ import type {
   CellRef,
   DomExtractNode,
   ExtractNode,
+  FailureKind,
   FlowDsl,
   FlowNode,
   InteractNode,
@@ -10,6 +11,7 @@ import type {
   NavigateNode,
   PickerNode,
   ResponseExtractNode,
+  RetryPolicy,
   SignalRef,
   Strategy,
   TargetRef,
@@ -37,6 +39,7 @@ import {
 } from "./panel.ts";
 import {
   ReplayError,
+  type InterventionRequest,
   type ReplayAttempt,
   type ReplayEvent,
   type ReplayHost,
@@ -44,7 +47,18 @@ import {
   type ReplayOptions,
   type ReplayResult,
   type ReplayStatus,
+  type RunCheckpoint,
+  type RunCursor,
+  type RunSnapshot,
+  type RunStatus,
+  type StepAttemptRecord,
 } from "./types.ts";
+import {
+  anySignal,
+  isInterruptError,
+  ReplayInterruptedError,
+  sleep,
+} from "./interrupts.ts";
 
 interface ResolveOptions {
   requireVisible: boolean;
@@ -60,6 +74,8 @@ interface ResolveOptions {
   exclude?: (element: Element) => boolean;
   /** 目标所在容器：只接受该容器内的命中（弹窗内字段不能落到背景表格）。 */
   within?: Element;
+  /** 中止信号：暂停/停止时立即唤醒轮询。 */
+  signal?: AbortSignal;
 }
 
 interface ResolvedTarget {
@@ -105,7 +121,9 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
     onBeforeNode,
     onNodeError,
     signal,
+    shouldPause,
     onEvent,
+    onSnapshot,
   } = options;
   const started = Date.now();
   const emit = (event: ReplayEvent): void => onEvent?.(event);
@@ -120,9 +138,50 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
 
   const results: ReplayNodeResult[] = [];
   const executed = new Set<string>();
+  /** 每个节点首次进入前的运行态；重试/分组重跑先回滚，避免脏变量。 */
+  const checkpoints = new Map<string, RunCheckpoint>();
+  const order = linearOrder(dsl, outgoing);
   let status: ReplayStatus = "finished";
   let failure: string | undefined;
   let current: string | undefined = dsl.entry;
+  let cursor: RunCursor | undefined = dsl.entry ? { nodeId: dsl.entry } : undefined;
+  let snapshotStatus: RunStatus = "running";
+  let pending: InterventionRequest | undefined;
+  /** 立即暂停靠中止当前尝试实现；每次尝试换一个 controller，不污染整次运行。 */
+  let attemptController: AbortController | undefined;
+
+  const publish = (next?: RunStatus): void => {
+    if (next) snapshotStatus = next;
+    const snapshot: RunSnapshot = {
+      runId: `run-${started}`,
+      status: snapshotStatus,
+      cursor,
+      results: results.map((item) => ({ ...item })),
+      env: { ...env },
+      pending,
+      totalNodes: dsl.nodes.length,
+      startedAt: started,
+      updatedAt: Date.now(),
+      error: failure,
+    };
+    onSnapshot?.(snapshot);
+    emit({ type: "run.snapshot", snapshot });
+  };
+
+  const captureCheckpoint = (nodeId: string): RunCheckpoint => ({
+    nodeId,
+    env: { ...env },
+    completed: [...executed],
+    resultCount: results.length,
+  });
+
+  /** 回滚到检查点：变量、结果与去重标记一起恢复。 */
+  const restoreCheckpoint = (checkpoint: RunCheckpoint): void => {
+    replaceRecord(env, checkpoint.env);
+    results.splice(checkpoint.resultCount);
+    executed.clear();
+    for (const id of checkpoint.completed) executed.add(id);
+  };
 
   emit({ type: "run.started", totalNodes: dsl.nodes.length });
 
@@ -132,6 +191,7 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
   ) {
     host.startNetworkCapture?.();
   }
+  publish("running");
 
   while (current) {
     if (signal?.aborted) {
@@ -154,20 +214,29 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
     let attempt = 0;
     let interrupted = false;
     let next: string | undefined;
+    let jumpTo: string | undefined;
+    /** 人工重试后重新计算自动重试预算，不因历史尝试把预算耗尽。 */
+    let retryBudgetBase = 0;
+    const attemptRecords: StepAttemptRecord[] = [];
+    const policy = retryPolicyOf(node, dsl, options.retry);
+    const maxAttempts = Math.max(1, policy.maxAttempts ?? 1);
+    if (!checkpoints.has(node.id)) checkpoints.set(node.id, captureCheckpoint(node.id));
+    const checkpoint = checkpoints.get(node.id)!;
+
+    if (onBeforeNode) {
+      await onBeforeNode(node.id);
+      if (signal?.aborted) {
+        status = "canceled";
+        failure = "回放已取消";
+        break;
+      }
+    }
 
     // 失败后人工可以要求重试：同一节点在此循环内重新执行，直到做出继续/跳过/停止的决定。
     while (true) {
       attempt += 1;
-      if (onBeforeNode) {
-        await onBeforeNode(node.id);
-        if (signal?.aborted) {
-          status = "canceled";
-          failure = "回放已取消";
-          interrupted = true;
-          break;
-        }
-      }
       executed.add(node.id);
+      cursor = { nodeId: node.id };
 
       const index = results.length;
       emit({
@@ -176,7 +245,9 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
         index,
         name: node.name,
         groupId: groupIdOf(node),
+        attempt,
       });
+      publish("running");
       const nodeStarted = Date.now();
 
       if (node.enabled === false) {
@@ -194,6 +265,17 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
         break;
       }
 
+      const progress: ExecuteProgress = { phase: "pre", dispatched: false };
+      attemptController = new AbortController();
+      const attemptSignal = anySignal([signal, attemptController.signal]);
+      // 立即暂停只在这一轮尝试内轮询；尝试结束就停表，避免遗留定时器。
+      const pauseTimer =
+        shouldPause === undefined
+          ? undefined
+          : setInterval(() => {
+              if (!shouldPause() || attemptController?.signal.aborted) return;
+              attemptController?.abort(new ReplayInterruptedError("pause"));
+            }, 50);
       try {
         const outcome = await executeNode({
           dsl,
@@ -202,8 +284,9 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
           env,
           node,
           isFirst: index === 0,
-          signal,
+          signal: attemptSignal,
           emit,
+          progress,
         });
         const record: ReplayNodeResult = {
           nodeId: node.id,
@@ -214,11 +297,48 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
           strategy: outcome.strategy,
           durationMs: Date.now() - nodeStarted,
         };
+        attemptRecords.push({
+          attempt,
+          startedAt: nodeStarted,
+          durationMs: record.durationMs,
+          status: outcome.healed ? "healed" : "passed",
+          message: outcome.message,
+          strategy: outcome.strategy,
+        });
+        emit({ type: "node.attempt", nodeId: node.id, attempt: attemptRecords.at(-1)! });
+        record.attempts = [...attemptRecords];
         results.push(record);
         emit({ type: "node.finished", node: record });
         next = nextNode(outgoing.get(node.id));
         break;
       } catch (error) {
+        const durationMs = Date.now() - nodeStarted;
+        const failureKind = classifyFailure(error, progress);
+
+        // 暂停中断不算失败：记录尝试、回滚到节点入口，交给人工决定重试还是跳过。
+        if (isInterruptError(error)) {
+          attemptRecords.push({
+            attempt,
+            startedAt: nodeStarted,
+            durationMs,
+            status: "interrupted",
+            message: errorMessage(error),
+            failureKind: "interrupted",
+          });
+          emit({ type: "node.attempt", nodeId: node.id, attempt: attemptRecords.at(-1)! });
+          if (error.interrupt === "stop") {
+            status = "canceled";
+            failure = "回放已取消";
+            interrupted = true;
+            break;
+          }
+          // 被中断的尝试不占用重试次数。
+          attempt -= 1;
+          restoreCheckpoint(checkpoint);
+          emit({ type: "run.paused", nodeId: node.id, mode: "immediate" });
+          publish("paused");
+        }
+
         // 停止按钮会中止等待中的响应/求值；此时不应再进入人工介入。
         if (signal?.aborted) {
           status = "canceled";
@@ -226,67 +346,187 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
           interrupted = true;
           break;
         }
+
         const record: ReplayNodeResult = {
           nodeId: node.id,
           name: node.name,
           groupId: groupIdOf(node),
           status: "fail",
           message: errorMessage(error),
-          durationMs: Date.now() - nodeStarted,
+          durationMs,
+          failureKind,
         };
+        if (!isInterruptError(error)) {
+          attemptRecords.push({
+            attempt,
+            startedAt: nodeStarted,
+            durationMs,
+            status: "failed",
+            message: record.message,
+            failureKind,
+            attempts: error instanceof ReplayError ? error.attempts : undefined,
+          });
+          emit({ type: "node.attempt", nodeId: node.id, attempt: attemptRecords.at(-1)! });
+        }
+        record.attempts = [...attemptRecords];
         results.push(record);
         emit({ type: "node.finished", node: record });
+        publish("running");
+
+        // 可安全重试的失败先按策略自动重试，耗尽后再升级到人工决策。
+        if (shouldAutoRetry(policy, failureKind, attempt - retryBudgetBase)) {
+          await sleep(retryDelay(policy, attempt - retryBudgetBase), attemptSignal);
+          results.pop();
+          restoreCheckpoint(checkpoint);
+          continue;
+        }
+
         if (!onNodeError) {
           status = "failed";
           failure = `${node.name ?? node.id}: ${record.message}`;
           interrupted = true;
           break;
         }
-        const decision = await onNodeError({
+
+        let request: InterventionRequest = {
           nodeId: node.id,
           name: node.name,
           type: node.type,
           message: record.message,
+          failureKind,
           attempt,
-          durationMs: record.durationMs,
+          maxAttempts,
+          durationMs,
           varName: node.type === "extract" ? node.varName : undefined,
-        });
-        if (signal?.aborted) {
-          status = "canceled";
-          failure = "回放已取消";
-          interrupted = true;
-          break;
-        }
-        if (decision.action === "stop") {
-          status = "failed";
-          failure = `${node.name ?? node.id}: ${record.message}`;
-          interrupted = true;
-          break;
-        }
-        if (decision.action === "retry") {
-          // 撤销本次失败记录与去重标记，等价于重新执行当前节点。
-          results.pop();
-          executed.delete(node.id);
-          continue;
-        }
-        const finalRecord: ReplayNodeResult =
-          decision.action === "skip"
-            ? { ...record, status: "skipped", message: `人工跳过：${record.message}` }
-            : { ...record, status: "manual", message: `人工补全：${record.message}` };
-        if (decision.action === "continue" && node.type === "extract") {
-          for (const [name, value] of Object.entries(decision.vars ?? {})) {
-            env[name] = value;
-            emit({ type: "var.set", nodeId: node.id, name, value });
+          mayHaveSideEffect: mayHaveSideEffect(node, failureKind, progress),
+          retryExhausted: maxAttempts > 1 && attempt >= maxAttempts,
+          attempts: [...attemptRecords],
+        };
+
+        let resolved:
+          | { action: "retry" }
+          | { action: "group"; nodeId: string }
+          | { action: "stop" }
+          | { action: "next"; record: ReplayNodeResult }
+          | undefined;
+
+        // continue 后的校验可能不通过：重新收集决策，而不是直接进入下一步。
+        while (!resolved) {
+          pending = request;
+          emit({ type: "run.intervening", request });
+          publish("intervening");
+          const decision = await onNodeError(request);
+          pending = undefined;
+          if (signal?.aborted) {
+            status = "canceled";
+            failure = "回放已取消";
+            interrupted = true;
+            resolved = { action: "stop" };
+            break;
+          }
+          if (decision.action === "stop") {
+            status = "failed";
+            failure = `${node.name ?? node.id}: ${record.message}`;
+            interrupted = true;
+            resolved = { action: "stop" };
+            break;
+          }
+          if (decision.action === "retry") {
+            resolved = { action: "retry" };
+            break;
+          }
+          if (decision.action === "retryGroup") {
+            const groupStart = groupStartOf(node.id, nodes, order);
+            resolved =
+              groupStart && groupStart !== node.id
+                ? { action: "group", nodeId: groupStart }
+                : { action: "retry" };
+            break;
+          }
+          if (decision.action === "skip") {
+            resolved = {
+              action: "next",
+              record: { ...record, status: "skipped", message: `人工跳过：${record.message}` },
+            };
+            break;
+          }
+          applyDecisionInputs(decision, node, env, emit);
+          if (decision.verify === false) {
+            resolved = {
+              action: "next",
+              record: { ...record, status: "manual", message: `人工补全：${record.message}` },
+            };
+            break;
+          }
+          try {
+            await verifyExpect(node, host, node.timeoutMs ?? dsl.defaults?.nodeTimeoutMs ?? DEFAULT_TIMEOUT_MS, {
+              ...values,
+              ...env,
+            }, signal);
+            resolved = {
+              action: "next",
+              record: {
+                ...record,
+                status: "manual",
+                message: `人工补全：${record.message}`,
+                verified: (node.expect?.length ?? 0) > 0 ? true : undefined,
+              },
+            };
+          } catch (verifyError) {
+            const message = `人工继续后校验未通过：${errorMessage(verifyError)}`;
+            const retried: ReplayNodeResult = {
+              ...record,
+              status: "fail",
+              message,
+              failureKind: "assertion",
+              verified: false,
+            };
+            results[results.length - 1] = retried;
+            emit({ type: "node.finished", node: retried });
+            request = {
+              ...request,
+              message,
+              failureKind: "assertion",
+              retryExhausted: true,
+            };
           }
         }
-        results[results.length - 1] = finalRecord;
-        emit({ type: "node.finished", node: finalRecord });
+
+        if (resolved.action === "stop") {
+          interrupted = true;
+          break;
+        }
+        if (resolved.action === "retry") {
+          results.pop();
+          restoreCheckpoint(checkpoint);
+          retryBudgetBase = attempt;
+          continue;
+        }
+        if (resolved.action === "group") {
+          // 分组重跑：清掉该分组及之后的执行标记与结果，从分组入口重新执行。
+          const groupStart = resolved.nodeId;
+          const checkpointOfGroup = checkpoints.get(groupStart);
+          results.pop();
+          rewindFrom(groupStart, order, executed, results, checkpoints);
+          if (checkpointOfGroup) restoreCheckpoint(checkpointOfGroup);
+          jumpTo = groupStart;
+          break;
+        }
+        results[results.length - 1] = resolved.record;
+        emit({ type: "node.finished", node: resolved.record });
+        publish("running");
         next = nextNode(outgoing.get(node.id));
         break;
+      } finally {
+        if (pauseTimer !== undefined) clearInterval(pauseTimer);
       }
     }
 
     if (interrupted) break;
+    if (jumpTo) {
+      current = jumpTo;
+      continue;
+    }
     current = next;
   }
 
@@ -294,6 +534,9 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
   const passed = results.filter(
     (item) => item.status === "pass" || item.status === "healed" || item.status === "manual",
   ).length;
+  status = status === "finished" && failure ? "failed" : status;
+  if (pending) pending = undefined;
+  publish(status === "finished" ? "finished" : status === "canceled" ? "canceled" : "failed");
   emit({
     type: "run.finished",
     status,
@@ -310,6 +553,147 @@ export async function runFlow(options: ReplayOptions): Promise<ReplayResult> {
     durationMs,
     vars: { ...env },
   };
+}
+
+/** 沿第一条出边展开执行链：分组重跑和快照游标都依赖这份顺序。 */
+function linearOrder(
+  dsl: FlowDsl,
+  outgoing: Map<string, FlowDsl["edges"]>,
+): string[] {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  let current: string | undefined = dsl.entry;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    order.push(current);
+    current = nextNode(outgoing.get(current));
+  }
+  return order;
+}
+
+/** 当前节点所在画布分组（flowNodeId）的入口节点。 */
+function groupStartOf(
+  nodeId: string,
+  nodes: Map<string, FlowNode>,
+  order: string[],
+): string | undefined {
+  const node = nodes.get(nodeId);
+  const groupId = node ? groupIdOf(node) : undefined;
+  if (!groupId) return undefined;
+  const index = order.indexOf(nodeId);
+  if (index <= 0) return undefined;
+  for (let cursorIndex = index; cursorIndex >= 0; cursorIndex -= 1) {
+    const candidate = nodes.get(order[cursorIndex]!);
+    if (!candidate || groupIdOf(candidate) !== groupId) {
+      return order[cursorIndex + 1];
+    }
+  }
+  // 分组一直延伸到链首：整条链从第一个节点重跑。
+  return order[0];
+}
+
+/** 丢弃从 nodeId 起的执行标记、结果与检查点。 */
+function rewindFrom(
+  nodeId: string,
+  order: string[],
+  executed: Set<string>,
+  results: ReplayNodeResult[],
+  checkpoints: Map<string, RunCheckpoint>,
+): void {
+  const index = order.indexOf(nodeId);
+  if (index < 0) return;
+  for (let cursorIndex = index; cursorIndex < order.length; cursorIndex += 1) {
+    const id = order[cursorIndex]!;
+    executed.delete(id);
+    checkpoints.delete(id);
+  }
+  const keep = results.findIndex((item) => item.nodeId === nodeId);
+  if (keep >= 0) results.splice(keep);
+}
+
+function retryPolicyOf(
+  node: FlowNode,
+  dsl: FlowDsl,
+  flowRetry: RetryPolicy | undefined,
+): RetryPolicy {
+  return { ...dsl.defaults?.retry, ...flowRetry, ...node.retry };
+}
+
+/** 可能已提交的失败默认不自动重试，避免重复写入。 */
+function shouldAutoRetry(
+  policy: RetryPolicy,
+  failureKind: FailureKind,
+  attempt: number,
+): boolean {
+  const max = Math.max(1, policy.maxAttempts ?? 1);
+  if (attempt >= max) return false;
+  if (failureKind === "interrupted") return false;
+  if (failureKind === "partial" || failureKind === "unknown") {
+    return policy.retryOnUncertain === true;
+  }
+  const tags = failureKind === "assertion" ? ["assertion"] : ["locator", "timeout"];
+  const allowed = policy.retryOn;
+  if (!allowed || allowed.length === 0) return true;
+  return tags.some((tag) => (allowed as string[]).includes(tag));
+}
+
+function retryDelay(policy: RetryPolicy, attempt: number): number {
+  const base = Math.max(0, policy.delayMs ?? 0);
+  if (base === 0) return 0;
+  const delay = policy.backoff === "exponential" ? base * 2 ** Math.max(0, attempt - 1) : base;
+  return Math.min(delay, 30_000);
+}
+
+/** 失败归因：动作是否已经发出，决定自动重试是否安全。 */
+function classifyFailure(error: unknown, progress: ExecuteProgress): FailureKind {
+  if (error instanceof ReplayError && error.failureKind) return error.failureKind;
+  if (isInterruptError(error)) return "interrupted";
+  if (progress.phase === "expect") return "assertion";
+  if (progress.dispatched) return "partial";
+  return "not-executed";
+}
+
+function mayHaveSideEffect(
+  node: FlowNode,
+  failureKind: FailureKind,
+  progress: ExecuteProgress,
+): boolean {
+  if (node.sideEffect === "write") return true;
+  if (node.sideEffect === "read") return false;
+  return progress.dispatched || failureKind === "partial" || failureKind === "unknown";
+}
+
+function applyDecisionInputs(
+  decision: { vars?: Record<string, string> },
+  node: FlowNode,
+  env: Record<string, unknown>,
+  emit: (event: ReplayEvent) => void,
+): void {
+  for (const [name, value] of Object.entries(decision.vars ?? {})) {
+    env[name] = value;
+    emit({ type: "var.set", nodeId: node.id, name, value });
+  }
+}
+
+/** 人工补全后重新执行节点的 expect 校验；未配置时不阻塞继续。 */
+async function verifyExpect(
+  node: FlowNode,
+  host: ReplayHost,
+  timeoutMs: number,
+  scope: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<void> {
+  for (const ref of node.expect ?? []) {
+    await waitSignal(host, ref, timeoutMs, scope, signal);
+  }
+}
+
+function replaceRecord(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): void {
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, source);
 }
 
 function groupIdOf(node: FlowNode): string | undefined {
@@ -332,6 +716,12 @@ function nextNode(edges: FlowDsl["edges"] | undefined): string | undefined {
   return (edges.find((edge) => !edge.when) ?? edges[0])?.to;
 }
 
+/** 失败归因用的执行阶段：动作是否已发出。 */
+interface ExecuteProgress {
+  phase: "pre" | "action" | "expect";
+  dispatched: boolean;
+}
+
 interface ExecuteContext {
   dsl: FlowDsl;
   host: ReplayHost;
@@ -342,6 +732,7 @@ interface ExecuteContext {
   isFirst: boolean;
   signal?: AbortSignal;
   emit: (event: ReplayEvent) => void;
+  progress: ExecuteProgress;
 }
 
 /** 表达式作用域：环境变量优先，节点 id 覆盖值只用于按节点取值。 */
@@ -353,8 +744,9 @@ async function executeNode(context: ExecuteContext): Promise<NodeOutcome> {
   const { node } = context;
   const timeoutMs = node.timeoutMs ?? context.dsl.defaults?.nodeTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   for (const signal of node.pre ?? []) {
-    await waitSignal(context.host, signal, timeoutMs, expressionScope(context));
+    await waitSignal(context.host, signal, timeoutMs, expressionScope(context), context.signal);
   }
+  context.progress.phase = "action";
   let outcome: NodeOutcome;
   switch (node.type) {
     case "navigate":
@@ -373,8 +765,9 @@ async function executeNode(context: ExecuteContext): Promise<NodeOutcome> {
       outcome = await executeExtract(context, node, timeoutMs);
       break;
   }
+  context.progress.phase = "expect";
   for (const signal of node.expect ?? []) {
-    await waitSignal(context.host, signal, timeoutMs, expressionScope(context));
+    await waitSignal(context.host, signal, timeoutMs, expressionScope(context), context.signal);
   }
   return outcome;
 }
@@ -404,15 +797,16 @@ async function executeNavigate(
           // 文档仍在切换，继续等下一轮。
         }
       }
-      await sleep(POLL_MS);
+      await sleep(POLL_MS, context.signal);
     }
     if (matched) {
       return { message: `已位于 ${url}，跳过重复导航` };
     }
   }
   await context.host.navigate(url, timeoutMs);
+  context.progress.dispatched = true;
   if (node.readySignal) {
-    await waitSignal(context.host, node.readySignal, timeoutMs, context.values);
+    await waitSignal(context.host, node.readySignal, timeoutMs, context.values, context.signal);
   }
   return { message: `导航到 ${url}` };
 }
@@ -426,6 +820,7 @@ async function executeInteract(
     requireVisible: true,
     allowMultiple: false,
     allowHiddenSelectInput: true,
+    signal: context.signal,
     activateCell:
       node.adapter === "input" ||
       node.adapter === "nativeSelect" ||
@@ -444,8 +839,9 @@ async function executeInteract(
     case "input": {
       const value = valueString(resolveNodeValue(node, expressionScope(context)));
       // 搜索输入通常会随下拉一起出现；先确保面板打开，再写入筛选值。
-      if (selectTrigger) await openSelect(selectTrigger);
+      if (selectTrigger) await openSelect(selectTrigger, context.signal);
       fillElement(element, value);
+      context.progress.dispatched = true;
       const actual = readElementValue(element);
       if (node.verify === "readBack" && actual !== value) {
         throw new ReplayError(
@@ -468,6 +864,7 @@ async function executeInteract(
     case "select": {
       const value = valueString(resolveNodeValue(node, expressionScope(context)));
       const actual = selectOption(element, value);
+      context.progress.dispatched = true;
       return {
         message: `选择 ${label} ${JSON.stringify(actual)}${valueSource(node.value)}`,
         strategy,
@@ -477,6 +874,7 @@ async function executeInteract(
     case "check": {
       const expected = resolveChecked(node, expressionScope(context));
       const actual = setChecked(element, expected);
+      context.progress.dispatched = true;
       if (actual !== expected) {
         throw new ReplayError(
           `勾选状态回读不一致: 期望 ${expected}，实际 ${actual}`,
@@ -492,22 +890,26 @@ async function executeInteract(
     case "click": {
       if (hiddenSelectControl && selectTrigger) {
         // 录制的点击目标可能是下拉的隐藏搜索输入；回放时点它的可见容器来展开面板。
-        await openSelect(selectTrigger);
+        await openSelect(selectTrigger, context.signal);
+        context.progress.dispatched = true;
         return { message: `打开下拉 ${label}`, strategy, healed };
       }
       clickElement(element);
+      context.progress.dispatched = true;
       await sleep(0);
       return { message: `点击 ${label}`, strategy, healed };
     }
     case "press": {
       const key = node.key ?? "Enter";
       pressKey(element, key);
+      context.progress.dispatched = true;
       return { message: `按键 ${key}`, strategy, healed };
     }
     case "hover": {
       hoverElement(hiddenSelectControl && selectTrigger ? selectTrigger : element);
+      context.progress.dispatched = true;
       // 给 hover 触发的展开动画/React 状态更新留一拍，后续节点仍会等待目标可见。
-      await sleep(50);
+      await sleep(50, context.signal);
       return { message: `悬停 ${label}`, strategy, healed };
     }
     case "upload": {
@@ -547,6 +949,7 @@ async function executePicker(
     requireVisible: true,
     allowMultiple: false,
     allowHiddenSelectInput: true,
+    signal: context.signal,
     exclude: (element) => Boolean(element.closest(FOREIGN_PANEL)),
   });
   const control = resolveSelectTrigger(trigger.element) ?? trigger.element;
@@ -555,15 +958,21 @@ async function executePicker(
   if (node.mode === "dialog" || !isPanelOpen(control, selector)) {
     if (node.triggerAction === "hover") {
       hoverElement(control);
-      await sleep(80);
+      await sleep(80, context.signal);
     } else {
       clickElement(control);
     }
+    context.progress.dispatched = true;
   }
 
   // 录制时的 popupId 会被重新挂载后的组件复用：每轮以触发器当前的 aria-controls 为准。
-  const resolution = await waitForPanel(doc, node, selector, stage.open, () =>
-    ariaControlsOf(control),
+  const resolution = await waitForPanel(
+    doc,
+    node,
+    selector,
+    stage.open,
+    () => ariaControlsOf(control),
+    context.signal,
   );
   if (!resolution) {
     throw new ReplayError(
@@ -581,15 +990,20 @@ async function executePicker(
     if (node.mode !== "inline" || reopenCount >= 3) return null;
     reopenCount += 1;
     clickElement(control);
-    const next = await waitForPanel(doc, node, selector, Math.min(stage.open, 1500), () =>
-      ariaControlsOf(control),
+    const next = await waitForPanel(
+      doc,
+      node,
+      selector,
+      Math.min(stage.open, 1500),
+      () => ariaControlsOf(control),
+      context.signal,
     );
     return next?.element ?? null;
   };
 
   if (node.filter && node.filter.steps.length > 0) {
     for (const [index, step] of node.filter.steps.entries()) {
-      const found = await waitForScoped(host, panel, step.target, stage.filter);
+      const found = await waitForScoped(host, panel, step.target, stage.filter, context.signal);
       const edited = override?.filters?.[index];
       const value =
         edited !== undefined && edited !== ""
@@ -601,6 +1015,7 @@ async function executePicker(
               );
       if (step.adapter === "input") {
         fillElement(found.element, value);
+        context.progress.dispatched = true;
         const actual = readElementValue(found.element);
         if (actual !== value) {
           throw new ReplayError(
@@ -610,16 +1025,19 @@ async function executePicker(
         }
       } else if (step.adapter === "nativeSelect") {
         selectOption(found.element, value);
+        context.progress.dispatched = true;
       } else if (step.adapter === "check") {
         setChecked(found.element, step.checked ?? true);
+        context.progress.dispatched = true;
       } else {
         clickElement(found.element);
+        context.progress.dispatched = true;
         await sleep(0);
       }
     }
 
     // 筛选后必须真的有结果，否则 pick 会退化成「找不到选项」，无法归因。
-    const remaining = await waitForResults(panel, rule, stage.filter);
+    const remaining = await waitForResults(panel, rule, stage.filter, context.signal);
     if (remaining === 0) throw new ReplayError(`筛选后无结果: ${label}`);
   }
 
@@ -647,15 +1065,18 @@ async function executePicker(
       control,
       reopenPanel,
       rowOverride,
+      context.signal,
     );
     panel = picked.panel;
     clickElement(pickClickTarget(picked.element, node, rowOverride));
+    context.progress.dispatched = true;
     await sleep(0);
   }
 
   if (node.commit) {
-    const target = await waitForScoped(host, panel, node.commit.target, timeoutMs);
+    const target = await waitForScoped(host, panel, node.commit.target, timeoutMs, context.signal);
     clickElement(target.element);
+    context.progress.dispatched = true;
     await sleep(0);
   }
 
@@ -663,14 +1084,14 @@ async function executePicker(
   if (resolution.binding === "temporal") message += "（面板时序降级）";
   const mustClose = node.mode === "dialog" && node.commit?.waitHidden !== false;
   if (mustClose) {
-    const closed = await waitForPanelClosed(panel, stage.close);
+    const closed = await waitForPanelClosed(panel, stage.close, context.signal);
     if (!closed) throw new ReplayError(`弹窗未在 5s 内关闭: ${label}`);
   } else if (node.pick.multi === true) {
     // 多选面板选完不会自己关：先 Escape，不行再点触发器 toggle；收尾最多等 1.2s。
-    const closed = await closeMultiSelect(panel, control, stage.multiClose);
+    const closed = await closeMultiSelect(panel, control, stage.multiClose, context.signal);
     if (!closed) message += "（多选面板未关闭，已继续）";
   } else {
-    const closed = await waitForPanelClosed(panel, stage.close);
+    const closed = await waitForPanelClosed(panel, stage.close, context.signal);
     if (!closed) message += "（面板未在 5s 内关闭，已继续）";
   }
 
@@ -789,13 +1210,19 @@ async function waitForScoped(
   root: Element,
   target: TargetRef,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<ResolvedTarget> {
   const deadline = Date.now() + timeoutMs;
   let attempts: ReplayAttempt[] = [];
   do {
     const doc = safeDocument(host);
     if (doc) {
-      const options = { requireVisible: true, allowMultiple: false, allowHiddenSelectInput: true };
+      const options = {
+        requireVisible: true,
+        allowMultiple: false,
+        allowHiddenSelectInput: true,
+        signal,
+      };
       const within = findTarget(root, target, options);
       if (within.resolved) return within.resolved;
       const global = findTarget(doc, target, options);
@@ -803,7 +1230,7 @@ async function waitForScoped(
       if (global.resolved) return global.resolved;
     }
     if (Date.now() >= deadline) break;
-    await sleep(POLL_MS);
+    await sleep(POLL_MS, signal);
   } while (true);
   throw new ReplayError(`面板内找不到目标: ${target.label ?? "未命名目标"}`, attempts);
 }
@@ -816,14 +1243,15 @@ async function closeMultiSelect(
   panel: Element,
   control: Element,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (!isVisible(panel)) return true;
   const deadline = Date.now() + timeoutMs;
   const remaining = (): number => Math.max(0, deadline - Date.now());
   pressKey(control, "Escape");
-  if (await waitForPanelClosed(panel, Math.min(400, remaining()))) return true;
+  if (await waitForPanelClosed(panel, Math.min(400, remaining()), signal)) return true;
   clickElement(control);
-  return waitForPanelClosed(panel, remaining());
+  return waitForPanelClosed(panel, remaining(), signal);
 }
 
 /** 面板里的滚动容器（antd 虚拟列表的 holder）；没有就返回 null。 */
@@ -847,6 +1275,7 @@ async function waitForPick(
   control?: Element,
   reopen?: () => Promise<Element | null>,
   byRowOverride?: boolean,
+  signal?: AbortSignal,
 ): Promise<{ element: Element; panel: Element }> {
   const deadline = Date.now() + timeoutMs;
   const byRow =
@@ -900,7 +1329,7 @@ async function waitForPick(
       }
     }
     if (Date.now() >= deadline) break;
-    await sleep(POLL_MS);
+    await sleep(POLL_MS, signal);
   } while (true);
   if (target.kind === "index") {
     const count = visibleItems(scopeForReport(currentPanel, rule, target), rule, byRow).length;
@@ -1032,6 +1461,7 @@ async function waitForResults(
   panel: Element,
   rule: PanelRule | undefined,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<number> {
   const selectors = [...itemSelectorsOf(rule, false), ...itemSelectorsOf(rule, true)];
   const deadline = Date.now() + Math.min(timeoutMs, 8000);
@@ -1047,7 +1477,7 @@ async function waitForResults(
     if (count > 0 && stable >= 2) return count;
     last = count;
     if (Date.now() >= deadline) return count;
-    await sleep(POLL_MS);
+    await sleep(POLL_MS, signal);
   } while (true);
 }
 
@@ -1057,7 +1487,7 @@ async function executeWait(
   timeoutMs: number,
 ): Promise<NodeOutcome> {
   const condition = node.condition;
-  await waitSignal(context.host, condition, timeoutMs, expressionScope(context));
+  await waitSignal(context.host, condition, timeoutMs, expressionScope(context), context.signal);
   return {
     message:
       typeof condition === "string"
@@ -1098,6 +1528,7 @@ async function executeExtract(
     const resolved = await waitForTarget(context.host, target, timeoutMs, {
       requireVisible: node.includeHidden !== true,
       allowMultiple: false,
+      signal: context.signal,
     });
     strategy = resolved.strategy;
     healed = resolved.healed;
@@ -1482,13 +1913,13 @@ function panelSelectorFor(element: Element): string | null {
  * 确保面板打开（交互节点的最小兜底）。
  * 已展开就不再点，避免把面板点关；点击后只等组件把状态提交到 DOM，超时交给后续节点。
  */
-async function openSelect(trigger: Element): Promise<void> {
+async function openSelect(trigger: Element, signal?: AbortSignal): Promise<void> {
   const selector = panelSelectorFor(trigger);
   if (isPanelOpen(trigger, selector)) return;
   clickElement(trigger);
   const deadline = Date.now() + PANEL_OPEN_TIMEOUT_MS;
   do {
-    await sleep(20);
+    await sleep(20, signal);
     if (isPanelOpen(trigger, selector)) return;
   } while (Date.now() < deadline);
 }
@@ -1523,43 +1954,51 @@ async function waitSignal(
   ref: SignalRef,
   timeoutMs: number,
   values: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (typeof ref === "string") {
     // 预设信号在最小演示里只用于可读展示；page-ready 已由 nav 的 load 事件覆盖。
     return;
   }
-  const signal = ref;
-  const budget = signal.timeoutMs ?? timeoutMs;
-  switch (signal.kind) {
+  const condition = ref;
+  const budget = condition.timeoutMs ?? timeoutMs;
+  switch (condition.kind) {
     case "visible":
-      await waitForTarget(host, signal.target, budget, {
+      await waitForTarget(host, condition.target, budget, {
         requireVisible: true,
         allowMultiple: true,
+        signal,
       });
       return;
     case "hidden":
-      await waitHidden(host, signal.target, budget);
+      await waitHidden(host, condition.target, budget, signal);
       return;
     case "attached":
-      await waitForTarget(host, signal.target, budget, {
+      await waitForTarget(host, condition.target, budget, {
         requireVisible: false,
         allowMultiple: true,
+        signal,
       });
       return;
     case "enabled":
-      await waitEnabled(host, signal.target, budget);
+      await waitEnabled(host, condition.target, budget, signal);
       return;
     case "url":
-      await poll(budget, () => host.getUrl().includes(signal.matches), `等待 URL 超时: ${signal.matches}`);
+      await poll(
+        budget,
+        () => host.getUrl().includes(condition.matches),
+        `等待 URL 超时: ${condition.matches}`,
+        signal,
+      );
       return;
     case "count":
-      await waitCount(host, signal, budget);
+      await waitCount(host, condition, budget, signal);
       return;
     case "text":
-      await waitText(host, signal, budget, values);
+      await waitText(host, condition, budget, values, signal);
       return;
     case "domStable":
-      await sleep(Math.min(signal.quietMs ?? 200, budget));
+      await sleep(Math.min(condition.quietMs ?? 200, budget), signal);
       return;
   }
 }
@@ -1618,12 +2057,17 @@ async function waitForTarget(
       }
     }
     if (Date.now() >= deadline) break;
-    await sleep(POLL_MS);
+    await sleep(POLL_MS, options.signal);
   } while (true);
   throw new ReplayError(targetErrorMessage(target, attempts, ambiguous), attempts);
 }
 
-async function waitHidden(host: ReplayHost, target: TargetRef, timeoutMs: number): Promise<void> {
+async function waitHidden(
+  host: ReplayHost,
+  target: TargetRef,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let attempts: ReplayAttempt[] = [];
   do {
@@ -1636,7 +2080,7 @@ async function waitHidden(host: ReplayHost, target: TargetRef, timeoutMs: number
       return;
     }
     if (Date.now() >= deadline) break;
-    await sleep(POLL_MS);
+    await sleep(POLL_MS, signal);
   } while (true);
   throw new ReplayError(
     `等待元素隐藏超时: ${target.label ?? "未命名目标"}`,
@@ -1644,59 +2088,73 @@ async function waitHidden(host: ReplayHost, target: TargetRef, timeoutMs: number
   );
 }
 
-async function waitEnabled(host: ReplayHost, target: TargetRef, timeoutMs: number): Promise<void> {
+async function waitEnabled(
+  host: ReplayHost,
+  target: TargetRef,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
   const resolved = await waitForTarget(host, target, timeoutMs, {
     requireVisible: true,
     allowMultiple: true,
+    signal,
   });
   await poll(
     timeoutMs,
     () => !isDisabled(resolved.element),
     `等待元素可操作超时: ${target.label ?? "未命名目标"}`,
+    signal,
   );
 }
 
 async function waitCount(
   host: ReplayHost,
-  signal: Extract<WaitSignal, { kind: "count" }>,
+  condition: Extract<WaitSignal, { kind: "count" }>,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   await poll(
     timeoutMs,
     () => {
       const doc = safeDocument(host);
       if (!doc) return false;
-      const count = queryAll(doc, signal.target).length;
-      if (signal.equals !== undefined && count !== signal.equals) return false;
-      if (signal.min !== undefined && count < signal.min) return false;
-      if (signal.max !== undefined && count > signal.max) return false;
+      const count = queryAll(doc, condition.target).length;
+      if (condition.equals !== undefined && count !== condition.equals) return false;
+      if (condition.min !== undefined && count < condition.min) return false;
+      if (condition.max !== undefined && count > condition.max) return false;
       return true;
     },
-    `等待元素数量条件超时: ${signal.target.label ?? "未命名目标"}`,
+    `等待元素数量条件超时: ${condition.target.label ?? "未命名目标"}`,
+    signal,
   );
 }
 
 async function waitText(
   host: ReplayHost,
-  signal: Extract<WaitSignal, { kind: "text" }>,
+  condition: Extract<WaitSignal, { kind: "text" }>,
   timeoutMs: number,
   values: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const resolved = await waitForTarget(host, signal.target, timeoutMs, {
+  const resolved = await waitForTarget(host, condition.target, timeoutMs, {
     requireVisible: true,
     allowMultiple: true,
+    signal,
   });
   const expected =
-    signal.equals === undefined ? undefined : valueString(valueFromExpression(signal.equals, values));
+    condition.equals === undefined
+      ? undefined
+      : valueString(valueFromExpression(condition.equals, values));
   await poll(
     timeoutMs,
     () => {
       const text = normalizeText(resolved.element.textContent ?? "");
-      if (signal.contains !== undefined) return text.includes(normalizeText(signal.contains));
+      if (condition.contains !== undefined) return text.includes(normalizeText(condition.contains));
       if (expected !== undefined) return text === normalizeText(expected);
       return text.length > 0;
     },
-    `等待文本条件超时: ${signal.target.label ?? "未命名目标"}`,
+    `等待文本条件超时: ${condition.target.label ?? "未命名目标"}`,
+    signal,
   );
 }
 
@@ -2130,12 +2588,13 @@ async function poll(
   timeoutMs: number,
   predicate: () => boolean,
   message: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   do {
     if (predicate()) return;
     if (Date.now() >= deadline) break;
-    await sleep(POLL_MS);
+    await sleep(POLL_MS, signal);
   } while (true);
   throw new ReplayError(message);
 }
@@ -2264,8 +2723,4 @@ function normalizeText(value: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

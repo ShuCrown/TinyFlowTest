@@ -135,6 +135,26 @@ export interface NodeMeta {
   [key: string]: unknown;
 }
 
+/** 失败阶段：决定能否安全自动重试。 */
+export type FailureKind =
+  | "not-executed"
+  | "partial"
+  | "unknown"
+  | "assertion"
+  | "interrupted";
+
+export type RetryOn = "locator" | "timeout" | "assertion" | "other";
+
+export interface RetryPolicy {
+  /** 含首次执行的最大尝试次数；1 表示不自动重试。 */
+  maxAttempts?: number;
+  delayMs?: number;
+  backoff?: "fixed" | "exponential";
+  retryOn?: RetryOn[];
+  /** 可能已提交的失败默认不自动重试；显式打开后才允许。 */
+  retryOnUncertain?: boolean;
+}
+
 export interface NodeBase {
   id: string;
   type: string;
@@ -144,6 +164,10 @@ export interface NodeBase {
   timeoutMs?: number;
   pre?: SignalRef[];
   expect?: SignalRef[];
+  /** 节点级重试策略；未配置时使用流程默认值。 */
+  retry?: RetryPolicy;
+  /** 副作用：写操作失败后重试可能产生重复数据。 */
+  sideEffect?: "read" | "write";
   meta?: NodeMeta;
 }
 
@@ -310,6 +334,8 @@ export interface FlowDefaults {
   screenshot?: "onFailure" | "always" | "never";
   resourcePolicy?: "balanced" | "fast" | "accurate";
   trace?: boolean;
+  /** 流程级默认重试策略。 */
+  retry?: RetryPolicy;
 }
 
 export interface FlowDsl {

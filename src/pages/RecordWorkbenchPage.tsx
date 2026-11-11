@@ -730,6 +730,7 @@ export function RecordWorkbenchPage() {
             return;
           }
           if (event.type === "var.set") return;
+          if (event.type !== "run.finished") return;
           const seconds = (event.durationMs / 1000).toFixed(1);
           setReplayText(
             event.status === "finished"
