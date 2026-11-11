@@ -99,7 +99,7 @@ function AlertDialogAction({
     <AlertDialogPrimitive.Action
       className={cn(
         buttonVariants({ variant: "default" }),
-        "border-danger bg-danger text-white hover:border-[#b91c1c] hover:bg-[#b91c1c]",
+        "border-danger bg-danger text-white hover:border-[#991b1b] hover:bg-[#991b1b]",
         className,
       )}
       {...props}

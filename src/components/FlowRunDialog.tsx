@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Activity,
   Check,
   FileJson,
+  ListOrdered,
   Loader2,
   Pause,
   Play,
@@ -10,6 +12,7 @@ import {
   SkipForward,
   SlidersHorizontal,
   TriangleAlert,
+  Variable,
   X,
 } from "lucide-react";
 
@@ -1238,7 +1241,8 @@ function RunStatusOverview({
   return (
     <Card className="shrink-0">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
+        <span className="flex items-center gap-1.5 font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
+          <Activity className="size-3.5 text-accent" />
           运行状态
         </span>
         <StepFilter
@@ -1324,7 +1328,8 @@ function RunVarsCard({ vars }: { vars: Record<string, unknown> }) {
   if (entries.length === 0) return null;
   return (
     <Card className="shrink-0">
-      <div className="font-mono text-[10px] font-semibold tracking-[0.1em] text-muted">
+      <div className="flex items-center gap-1.5 font-mono text-[10px] font-semibold tracking-[0.1em] text-muted">
+        <Variable className="size-3.5 text-accent" />
         运行变量
       </div>
       <div className="mt-2.5 flex flex-wrap gap-2">
@@ -1415,7 +1420,10 @@ function RunStepsPanel({
   return (
     <Card className="min-h-[220px] min-w-0 flex-1">
       <div className="flex shrink-0 items-center justify-between gap-2">
-        <h3 className="text-[13px] font-semibold">节点步骤</h3>
+        <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
+          <ListOrdered className="size-3.5 text-accent" />
+          节点步骤
+        </h3>
         <span className="text-[10.5px] text-muted">按执行顺序 · 同组共享容器</span>
       </div>
 

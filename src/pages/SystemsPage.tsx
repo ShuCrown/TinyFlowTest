@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Pencil, Plus, Save, Trash2, TriangleAlert, X } from "lucide-react";
+import { Pencil, Plus, Save, Server, Trash2, TriangleAlert, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -96,7 +96,10 @@ function SystemDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{system ? "编辑系统" : "新增系统"}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Server className="size-4 text-accent" />
+            {system ? "编辑系统" : "新增系统"}
+          </DialogTitle>
           <DialogDescription>
             系统地址会在录制与回放时作为同源代理目标使用；登录令牌可选，只保存在当前标签页。
           </DialogDescription>
@@ -238,6 +241,7 @@ export function SystemsPage() {
   return (
     <div className="flex flex-col gap-4 pb-10">
       <PageHeader
+        icon={<Server className="size-6 text-accent shrink-0" />}
         title="系统管理"
         description="维护被测系统的名称、目标地址与登录令牌。令牌仅保存在当前标签页的会话存储，关闭标签页即清除；系统资料仍保存在本地存储。"
         actions={
@@ -250,6 +254,7 @@ export function SystemsPage() {
 
       {systems.length === 0 ? (
         <EmptyState
+          icon={<Server className="size-5" />}
           code="SYS"
           title="还没有系统"
           description="先登记一个目标系统，后续新增操作记录时就能直接选择它。"
@@ -266,6 +271,7 @@ export function SystemsPage() {
             <ItemCard
               key={system.id}
               code={`系统-${system.id.slice(-4).toUpperCase()}`}
+              icon={<Server className="size-4 shrink-0 text-accent" />}
               title={system.name}
               actions={
                 <>
@@ -316,7 +322,10 @@ export function SystemsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除这个系统？</AlertDialogTitle>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <TriangleAlert className="size-4 text-danger" />
+              删除这个系统？
+            </AlertDialogTitle>
             <AlertDialogDescription>
               「{deleting?.name}」会从当前浏览器移除，已绑定的操作记录不会被删除。
             </AlertDialogDescription>

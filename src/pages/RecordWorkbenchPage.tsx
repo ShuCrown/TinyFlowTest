@@ -5,12 +5,16 @@ import {
   CheckCircle2,
   Crosshair,
   FileJson,
+  Globe,
   Loader2,
   MonitorDot,
   Play,
+  Radio,
   RefreshCw,
   Save,
+  Server,
   SlidersHorizontal,
+  Sparkles,
   Square,
   Trash2,
   TriangleAlert,
@@ -774,6 +778,12 @@ export function RecordWorkbenchPage() {
             <ArrowLeft />
             返回记录列表
           </Button>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="tf-display flex items-center gap-2 truncate text-[20px] leading-tight">
+              <MonitorDot className="size-5 shrink-0 text-accent" />
+              {record.name}
+            </h1>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={phaseBadge.variant}>{phaseBadge.label}</Badge>
@@ -835,7 +845,10 @@ export function RecordWorkbenchPage() {
         <div className="flex w-full min-w-0 shrink-0 flex-col gap-2.5 xl:min-h-0 xl:w-[360px] xl:overflow-y-auto xl:pr-1">
           <Card className="shrink-0 gap-0 overflow-hidden p-0">
             <CardHeader className="flex flex-row items-center justify-between border-b border-line px-4 pb-2.5 pt-3">
-              <CardTitle>所属系统</CardTitle>
+              <CardTitle>
+                <Server className="size-4 shrink-0 text-accent" />
+                所属系统
+              </CardTitle>
               <Badge variant={currentSystem ? "moss" : "secondary"}>
                 {currentSystem
                   ? "已绑定"
@@ -885,7 +898,10 @@ export function RecordWorkbenchPage() {
 
           <Card className="shrink-0 gap-0 overflow-hidden p-0">
             <CardHeader className="flex flex-row items-center justify-between border-b border-line px-4 pb-2.5 pt-3">
-              <CardTitle>录制事件</CardTitle>
+              <CardTitle>
+                <Radio className="size-4 shrink-0 text-accent" />
+                录制事件
+              </CardTitle>
               <Badge variant="secondary">{steps.length} 步</Badge>
             </CardHeader>
             <CardContent className="p-0">
@@ -1101,7 +1117,10 @@ export function RecordWorkbenchPage() {
 
           <Card className="flex flex-col gap-0 overflow-hidden p-0 xl:min-h-[320px] xl:flex-1">
             <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-line px-4 pb-2.5 pt-3">
-              <CardTitle>转换结果</CardTitle>
+              <CardTitle>
+                <Sparkles className="size-4 shrink-0 text-accent" />
+                转换结果
+              </CardTitle>
               {result ? (
                 <div className="flex items-center gap-1.5">
                   <Badge variant="moss">{result.dsl.nodes.length} 节点</Badge>
@@ -1275,7 +1294,10 @@ export function RecordWorkbenchPage() {
         <Card className="flex w-full min-w-0 flex-col gap-0 overflow-hidden p-0 xl:min-h-0 xl:flex-1">
           <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 border-b border-line px-4 py-2.5">
             <div className="flex min-w-0 items-center gap-2">
-              <CardTitle>目标系统</CardTitle>
+              <CardTitle>
+                <Globe className="size-4 shrink-0 text-accent" />
+                目标系统
+              </CardTitle>
               <Badge variant={replaying || recording ? "accent" : "secondary"}>{frameBadge}</Badge>
             </div>
             <div className="flex min-w-0 items-center gap-2">
@@ -1347,7 +1369,10 @@ export function RecordWorkbenchPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除这个节点？</AlertDialogTitle>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <TriangleAlert className="size-4 text-danger" />
+              删除这个节点？
+            </AlertDialogTitle>
             <AlertDialogDescription>
               「{deletingNode ? nodeLabel(deletingNode.node) : ""}」会连同它对应的{" "}
               {deletingNode?.indices.length ?? 0} 条录制事件一起删除，剩余步骤会重新生成节点；

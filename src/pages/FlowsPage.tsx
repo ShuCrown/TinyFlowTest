@@ -71,7 +71,10 @@ function FlowDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{flow ? "编辑流程" : "新建流程"}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Workflow className="size-4 text-accent" />
+            {flow ? "编辑流程" : "新建流程"}
+          </DialogTitle>
           <DialogDescription>
             流程用来组织多条操作记录的执行顺序。保存后进入画布，用取值节点把上一步的主键 code
             带到下一步。
@@ -169,6 +172,7 @@ export function FlowsPage() {
   return (
     <div className="flex flex-col gap-4 pb-10">
       <PageHeader
+        icon={<Workflow className="size-6 text-accent shrink-0" />}
         title="流程"
         description="流程把多条操作记录串成顺序执行链；画布里的取值节点负责把前一步保存的主键 code 变成环境变量，再注入下一步的筛选与选择。"
         actions={
@@ -181,6 +185,7 @@ export function FlowsPage() {
 
       {flows.length === 0 ? (
         <EmptyState
+          icon={<Workflow className="size-5" />}
           code="FLW"
           title="还没有流程"
           description="先建立流程，再把新建 / 编辑类的操作记录按顺序放进来。编号扣子会把上一步产出的业务编号，带到下一步的字段赋值或筛选。"
@@ -223,6 +228,7 @@ export function FlowsPage() {
             <ItemCard
               key={flow.id}
               code={flowCode(flow.id)}
+              icon={<Workflow className="size-4 shrink-0 text-accent" />}
               title={flow.name}
               badge={
                 <Badge variant={flow.status === "ready" ? "moss" : "amber"}>
@@ -278,7 +284,10 @@ export function FlowsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除这条流程？</AlertDialogTitle>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <TriangleAlert className="size-4 text-danger" />
+              删除这条流程？
+            </AlertDialogTitle>
             <AlertDialogDescription>
               「{deleting?.name}」会从当前浏览器移除，画布编排与注入配置将无法恢复；操作记录本身不会被删除。
             </AlertDialogDescription>

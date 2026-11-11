@@ -29,6 +29,9 @@ import {
   Play,
   Plus,
   Save,
+  Sliders,
+  SlidersHorizontal,
+  TableProperties,
   Trash2,
   TriangleAlert,
   Variable,
@@ -79,8 +82,8 @@ import {
 import type { ExtractProducer } from "@/flow/vars.ts";
 
 const EMPTY_GRAPH: FlowGraph = { nodes: [], edges: [], injections: [], vars: [] };
-const RECORD_COLOR = "#2563eb";
-const EXTRACT_COLOR = "#059669";
+const RECORD_COLOR = "#2f4c7e";
+const EXTRACT_COLOR = "#047857";
 
 type SlotsMode = "recorded" | "literal" | "var";
 
@@ -490,8 +493,8 @@ export function FlowCanvasPage() {
         source: edge.from,
         target: edge.to,
         type: "flowEdge",
-        markerEnd: { type: MarkerType.ArrowClosed, color: "#2563eb", width: 17, height: 17 },
-        style: { stroke: "#2563eb", strokeWidth: 1.8 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: RECORD_COLOR, width: 17, height: 17 },
+        style: { stroke: RECORD_COLOR, strokeWidth: 1.8 },
       })),
     [graph.edges],
   );
@@ -781,7 +784,10 @@ export function FlowCanvasPage() {
             返回流程列表
           </Button>
           <div className="flex min-w-0 items-center gap-2">
-            <h1 className="tf-display truncate text-[22px] leading-tight">{flow.name}</h1>
+            <h1 className="tf-display flex items-center gap-2 truncate text-[22px] leading-tight">
+              <Workflow className="size-5 shrink-0 text-accent" />
+              {flow.name}
+            </h1>
             {compiled.error ? <Badge variant="amber">草稿</Badge> : <Badge variant="moss">可运行</Badge>}
           </div>
         </div>
@@ -994,7 +1000,7 @@ export function FlowCanvasPage() {
                   const data = node.data as FlowNodeData | undefined;
                   return data?.node.kind === "extract" ? EXTRACT_COLOR : RECORD_COLOR;
                 }}
-                maskColor="rgba(244, 246, 249, 0.75)"
+                maskColor="rgba(235, 237, 242, 0.75)"
               />
               {graph.nodes.length === 0 ? (
                 <div className="pointer-events-none absolute inset-0 grid place-items-center px-8 text-center">
@@ -1209,7 +1215,11 @@ function RecordInspector({
   if (!record) {
     return (
       <InspectorCard>
-        <InspectorTitle code="操作记录" title="记录已删除" />
+        <InspectorTitle
+          icon={<Workflow className="size-4 shrink-0 text-accent" />}
+          code="操作记录"
+          title="记录已删除"
+        />
         <p className="mt-2 text-[11.5px] leading-5 text-danger">
           这条操作记录不在本地存储里，请删除节点或重新录制。
         </p>
@@ -1232,7 +1242,11 @@ function RecordInspector({
   return (
     <>
       <InspectorCard>
-        <InspectorTitle code="操作记录" title={record.name} />
+        <InspectorTitle
+          icon={<Workflow className="size-4 shrink-0 text-accent" />}
+          code="操作记录"
+          title={record.name}
+        />
         <div className="mt-2 flex flex-wrap gap-1">
           <Badge variant="secondary">{record.nodes} 节点</Badge>
           <Badge variant="secondary">{record.status === "ready" ? "已录制" : "草稿"}</Badge>
@@ -1256,6 +1270,7 @@ function RecordInspector({
       {recordExtracts.length > 0 ? (
         <InspectorCard>
           <InspectorSectionHeader
+            icon={<Variable className="size-3.5 shrink-0 text-moss" />}
             label="记录内取值"
             aside={<Badge variant="moss">{recordExtracts.length}</Badge>}
           />
@@ -1305,6 +1320,7 @@ function RecordInspector({
 
       <InspectorCard>
         <InspectorSectionHeader
+          icon={<Sliders className="size-3.5 shrink-0 text-accent" />}
           label="微调值"
           aside={<Badge variant="secondary">{slots.length}</Badge>}
         />
@@ -1466,18 +1482,18 @@ function ExtractInspector({
   return (
     <>
       <InspectorCard className="min-w-0">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
-            取值节点
-          </span>
-          <span className="break-all font-mono text-[9.5px] text-muted">{node.id}</span>
-        </div>
+        <InspectorTitle
+          icon={<Variable className="size-4 shrink-0 text-moss" />}
+          code="取值节点"
+          title={node.name || node.id}
+        />
         <p className="mt-1.5 text-[11px] leading-4 text-muted">
           在弹窗里录制真实操作和取值步骤；每个取值会生成一个环境变量。
         </p>
 
         <div className="mt-3">
           <InspectorSectionHeader
+            icon={<TableProperties className="size-3.5 shrink-0 text-moss" />}
             label="取值表格"
             aside={
               <div className="flex flex-wrap items-center gap-1.5">
@@ -1707,7 +1723,11 @@ function VarPanel({
 
   return (
     <InspectorCard className="min-w-0">
-      <InspectorTitle code="变量" title="流程环境变量" />
+      <InspectorTitle
+        icon={<SlidersHorizontal className="size-4 shrink-0 text-accent" />}
+        code="变量"
+        title="流程环境变量"
+      />
       <p className="mt-1.5 text-[11px] leading-4 text-muted">
         画布取值和记录内取值产出的变量都在这里汇总展示；改名请回到对应的取值节点或记录里操作。
       </p>
@@ -1835,14 +1855,17 @@ function InspectorCard({
 
 function InspectorSectionHeader({
   label,
+  icon,
   aside,
 }: {
   label: string;
+  icon?: ReactNode;
   aside?: ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-muted">
+      <span className="flex items-center gap-1.5 font-mono text-[10px] font-semibold tracking-[0.12em] text-muted">
+        {icon}
         {label}
       </span>
       {aside}
@@ -1850,13 +1873,24 @@ function InspectorSectionHeader({
   );
 }
 
-function InspectorTitle({ code, title }: { code: string; title: string }) {
+function InspectorTitle({
+  code,
+  title,
+  icon,
+}: {
+  code: string;
+  title: string;
+  icon?: ReactNode;
+}) {
   return (
     <div className="min-w-0">
       <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-accent">
         {code}
       </span>
-      <h2 className="mt-1.5 break-words text-[15px] font-semibold tracking-tight">{title}</h2>
+      <h2 className="mt-1 flex items-center gap-1.5 break-words text-[15px] font-semibold tracking-tight">
+        {icon}
+        <span className="truncate">{title}</span>
+      </h2>
     </div>
   );
 }

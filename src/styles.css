@@ -2,21 +2,23 @@
 @import "tw-animate-css";
 
 @theme {
-  --color-paper: #f4f6f9;
+  --color-paper: #ebedf2;
   --color-panel: #ffffff;
   --color-ink: #0f172a;
   --color-muted: #64748b;
-  --color-line: #e2e8f0;
-  --color-accent: #2563eb;
-  --color-accent-soft: #eff6ff;
-  --color-moss: #059669;
+  --color-line: #d8dee8;
+  /* 品牌/操作色：低彩度墨蓝，与蓝灰中性底同色相咬合，不靠高饱和抢视线 */
+  --color-accent: #2f4c7e;
+  --color-accent-soft: #e8eef9;
+  --color-moss: #047857;
   --color-moss-soft: #ecfdf5;
-  --color-amber: #d97706;
+  --color-amber: #b45309;
   --color-amber-soft: #fffbeb;
-  --color-danger: #dc2626;
+  --color-danger: #b91c1c;
   --color-danger-soft: #fef2f2;
-  /* 执行中：与失败红拉开色相，避免把「进行中」误读成「出错」 */
-  --color-running: #0284c7;
+  /* 执行中：全站唯一的饱和蓝。品牌色已降为墨蓝，这里用高彩度天蓝专指「正在运行」，
+     靠彩度与明度双重差异区分，而非色相；也避免被误读成出错红或普通强调 */
+  --color-running: #0369a1;
   --color-running-soft: #f0f9ff;
 
   --font-body: "Inter", "Noto Sans SC", "PingFang SC", system-ui, -apple-system, sans-serif;
@@ -41,9 +43,8 @@ body {
   margin: 0;
   color: var(--color-ink);
   background-color: var(--color-paper);
-  background-image:
-    radial-gradient(circle at 12% -8%, rgba(37, 99, 235, 0.07), transparent 35%),
-    radial-gradient(circle at 92% 4%, rgba(5, 150, 105, 0.05), transparent 30%);
+  /* 单一冷调环境光，取代原来的蓝+绿双色光晕：双色相加只见复杂度不见层次 */
+  background-image: radial-gradient(circle at 12% -8%, rgba(47, 76, 126, 0.07), transparent 34%);
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.55;
@@ -51,7 +52,7 @@ body {
 }
 
 ::selection {
-  background: rgba(37, 99, 235, 0.16);
+  background: rgba(47, 76, 126, 0.16);
   color: var(--color-ink);
 }
 

@@ -107,7 +107,10 @@ function RecordDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{record ? "编辑记录" : "新增记录"}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <MonitorDot className="size-4 text-accent" />
+            {record ? "编辑记录" : "新增记录"}
+          </DialogTitle>
           <DialogDescription>
             记录是一次操作录制的容器；录制 JSON、转换后的 DSL 与回放微调值都会挂在记录下。
           </DialogDescription>
@@ -274,6 +277,7 @@ export function RecordsPage() {
   return (
     <div className="flex flex-col gap-4 pb-10">
       <PageHeader
+        icon={<MonitorDot className="size-6 text-accent shrink-0" />}
         title="操作记录"
         description="一次录制 = 一条记录：打开目标系统，在目标页完成表单填写、下拉选择等操作，停止后自动生成节点并保存。"
         actions={
@@ -286,6 +290,7 @@ export function RecordsPage() {
 
       {records.length === 0 ? (
         <EmptyState
+          icon={<MonitorDot className="size-5" />}
           code="REC"
           title="还没有操作记录"
           description="先建立一条记录，随后在录制工作台里打开目标系统，捕获点击、输入、下拉与页面跳转。"
@@ -312,6 +317,7 @@ export function RecordsPage() {
             <ItemCard
               key={record.id}
               code={`REC-${record.id.slice(-4).toUpperCase()}`}
+              icon={<MonitorDot className="size-4 shrink-0 text-accent" />}
               title={record.name}
               badge={
                 <Badge variant={record.status === "ready" ? "moss" : "amber"}>
@@ -377,7 +383,10 @@ export function RecordsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除这条记录？</AlertDialogTitle>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <TriangleAlert className="size-4 text-danger" />
+              删除这条记录？
+            </AlertDialogTitle>
             <AlertDialogDescription>
               「{deleting?.name}」会从当前浏览器移除，录制内容与回放微调值将无法恢复。
             </AlertDialogDescription>
