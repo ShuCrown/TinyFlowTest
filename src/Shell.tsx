@@ -16,7 +16,7 @@ export function Shell() {
     <div className="flex min-h-screen">
       <aside className="sticky top-0 flex h-screen w-[78px] shrink-0 flex-col border-r border-line bg-panel/95 backdrop-blur md:w-[86px]">
         <div className="flex h-[72px] items-center justify-center border-b border-line">
-          <div className="grid h-10 w-10 place-items-center rounded-[12px] bg-gradient-to-br from-accent to-[#1f47a8] text-[13px] font-bold tracking-[0.06em] text-white shadow-md shadow-accent/25">
+          <div className="grid h-10 w-10 place-items-center rounded-[12px] bg-gradient-to-br from-accent to-[#1a3f8f] text-[13px] font-bold tracking-[0.06em] text-white shadow-md shadow-accent/25">
             TF
           </div>
         </div>

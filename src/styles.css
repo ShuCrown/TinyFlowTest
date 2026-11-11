@@ -2,26 +2,25 @@
 @import "tw-animate-css";
 
 @theme {
-  /* 暖灰纸面：中性色偏暖，去掉水泥冷灰；白卡片保持纯白以提亮、不发闷 */
-  --color-paper: #f3eee6;
+  /* 暖纸面：提亮并降低黄调，去掉发闷的灰 beige；中性色只留一丝暖意，白卡片纯白提亮 */
+  --color-paper: #f6f4ef;
   --color-panel: #ffffff;
   --color-ink: #2b2721;
-  --color-muted: #6f6350;
-  --color-line: #e6ddcf;
-  /* 品牌/操作色：高彩度亮蓝。靠彩度而非抬明度提亮，避免白字按钮与 10px 蓝字掉出 AA；
-     accent-soft 相应调到近白，浅底上的蓝字仍达 4.61:1 */
-  --color-accent: #2f6fd8;
-  --color-accent-soft: #f8fbff;
+  --color-muted: #6b655c;
+  --color-line: #e8e3d9;
+  /* 品牌/操作色：墨蓝。比亮蓝更深更沉，与暖纸面是「墨落纸上」的同族搭配，
+     白字按钮 6.87:1、纸面蓝字 6.25:1，小字号也稳过 AA */
+  --color-accent: #2456b3;
+  --color-accent-soft: #e9eefb;
   --color-moss: #047857;
-  --color-moss-soft: #ecfdf5;
-  --color-amber: #b45309;
-  --color-amber-soft: #fffbeb;
+  --color-moss-soft: #def2e7;
+  --color-amber: #a34a06;
+  --color-amber-soft: #fcefd3;
   --color-danger: #b91c1c;
-  --color-danger-soft: #fef2f2;
-  /* 执行中：青绿，与蓝色主色靠色相和明度拉开，专指「正在运行」，
-     不会把进行中误读成出错红或普通强调 */
+  --color-danger-soft: #fbe4e4;
+  /* 执行中：青绿，与墨蓝靠色相和明度拉开，专指「正在运行」 */
   --color-running: #0b7079;
-  --color-running-soft: #e6f3f3;
+  --color-running-soft: #d9ecec;
 
   --font-body: "Inter", "Noto Sans SC", "PingFang SC", system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -53,7 +52,7 @@ body {
 }
 
 ::selection {
-  background: rgba(47, 111, 216, 0.16);
+  background: rgba(36, 86, 179, 0.16);
   color: var(--color-ink);
 }
 

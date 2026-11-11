@@ -82,7 +82,7 @@ import {
 import type { ExtractProducer } from "@/flow/vars.ts";
 
 const EMPTY_GRAPH: FlowGraph = { nodes: [], edges: [], injections: [], vars: [] };
-const RECORD_COLOR = "#2f6fd8";
+const RECORD_COLOR = "#2456b3";
 const EXTRACT_COLOR = "#047857";
 
 type SlotsMode = "recorded" | "literal" | "var";
@@ -989,7 +989,7 @@ export function FlowCanvasPage() {
               defaultEdgeOptions={{ type: "smoothstep" }}
               proOptions={{ hideAttribution: true }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#dcd2c0" />
+              <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#ddd6c9" />
               <Controls position="bottom-left" showInteractive={false} />
               <MiniMap
                 position="bottom-right"
@@ -1000,7 +1000,7 @@ export function FlowCanvasPage() {
                   const data = node.data as FlowNodeData | undefined;
                   return data?.node.kind === "extract" ? EXTRACT_COLOR : RECORD_COLOR;
                 }}
-                maskColor="rgba(243, 238, 230, 0.75)"
+                maskColor="rgba(246, 244, 239, 0.75)"
               />
               {graph.nodes.length === 0 ? (
                 <div className="pointer-events-none absolute inset-0 grid place-items-center px-8 text-center">
