@@ -429,7 +429,6 @@ export function FlowRunDialog({
   const [vars, setVars] = useState<Record<string, unknown>>({});
   const [failure, setFailure] = useState<InterventionRequest | null>(null);
   const [extractValue, setExtractValue] = useState("");
-  const [verifyOnContinue, setVerifyOnContinue] = useState(true);
   const [frameUrl, setFrameUrl] = useState("");
   const [proxyConfig, setProxyConfig] = useState<ProxyConfig | null>(null);
   const [inputTuning, setInputTuning] = useState<Record<string, string>>({});
@@ -782,13 +781,11 @@ export function FlowRunDialog({
     const name = failure?.varName;
     const value = extractValue.trim();
     setPhase("running");
-    setStatusText(
-      verifyOnContinue ? "已按人工补全继续，正在校验 expect…" : "已按人工补全继续执行…",
-    );
+    setStatusText("已按人工补全继续，正在校验 expect…");
     controllerRef.current?.send({
       action: "continue",
       ...(name && value ? { vars: { [name]: value } } : {}),
-      verify: verifyOnContinue,
+      verify: true,
     });
     setFailure(null);
     setExtractValue("");
@@ -1128,8 +1125,7 @@ export function FlowRunDialog({
                     </ol>
                   ) : null}
                   <p className="mt-2 text-[11px] leading-4 text-muted">
-                    可直接在左侧目标页手动完成这一步，然后点「已补全，继续」。继续不会重复执行该节点
-                    {verifyOnContinue ? "，但会重新校验本节点的 expect 条件" : ""}。
+                    可直接在左侧目标页手动完成这一步，然后点「已补全，继续」。继续不会重复执行该节点，但会重新校验本节点的 expect 条件。
                   </p>
                   {failure.varName ? (
                     <div className="mt-2">
@@ -1144,15 +1140,6 @@ export function FlowRunDialog({
                       />
                     </div>
                   ) : null}
-                  <label className="mt-2 flex items-center gap-1.5 text-[10.5px] text-muted">
-                    <input
-                      type="checkbox"
-                      className="size-3 accent-current"
-                      checked={verifyOnContinue}
-                      onChange={(event) => setVerifyOnContinue(event.target.checked)}
-                    />
-                    继续前重新校验 expect（推荐）
-                  </label>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <Button size="sm" onClick={continueAfterManual}>
                       <Check />
