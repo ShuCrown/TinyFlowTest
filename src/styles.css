@@ -8,9 +8,10 @@
   --color-ink: #2b2721;
   --color-muted: #6f6350;
   --color-line: #e6ddcf;
-  /* 品牌/操作色：提亮的丹宁蓝，比深墨蓝明度高、不发暗，保留产品原有的蓝色识别 */
-  --color-accent: #3f6ea8;
-  --color-accent-soft: #e9f0f8;
+  /* 品牌/操作色：高彩度亮蓝。靠彩度而非抬明度提亮，避免白字按钮与 10px 蓝字掉出 AA；
+     accent-soft 相应调到近白，浅底上的蓝字仍达 4.61:1 */
+  --color-accent: #2f6fd8;
+  --color-accent-soft: #f8fbff;
   --color-moss: #047857;
   --color-moss-soft: #ecfdf5;
   --color-amber: #b45309;
@@ -52,7 +53,7 @@ body {
 }
 
 ::selection {
-  background: rgba(63, 110, 168, 0.16);
+  background: rgba(47, 111, 216, 0.16);
   color: var(--color-ink);
 }
 

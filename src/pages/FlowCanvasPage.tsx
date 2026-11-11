@@ -82,7 +82,7 @@ import {
 import type { ExtractProducer } from "@/flow/vars.ts";
 
 const EMPTY_GRAPH: FlowGraph = { nodes: [], edges: [], injections: [], vars: [] };
-const RECORD_COLOR = "#3f6ea8";
+const RECORD_COLOR = "#2f6fd8";
 const EXTRACT_COLOR = "#047857";
 
 type SlotsMode = "recorded" | "literal" | "var";
