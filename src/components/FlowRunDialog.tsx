@@ -8,6 +8,8 @@ import {
   FileJson,
   FileText,
   ListOrdered,
+  PanelRightClose,
+  PanelRightOpen,
   Pause,
   Play,
   RefreshCw,
@@ -442,6 +444,7 @@ export function FlowRunDialog({
   const [pickerTuning, setPickerTuning] = useState<Record<string, PickerDraft>>({});
   const [extractTuning, setExtractTuning] = useState<Record<string, ExtractEditor>>({});
   const [stepFilter, setStepFilter] = useState<"all" | "tunable">("all");
+  const [panelOpen, setPanelOpen] = useState(true);
   const stepRefs = useRef(new Map<string, HTMLLIElement>());
 
   const recordMap = useMemo(() => new Map(records.map((record) => [record.id, record])), [records]);
@@ -736,6 +739,7 @@ export function FlowRunDialog({
       runtimeValuesRef.current = null;
       disposeRunHost();
       reset();
+      setPanelOpen(true);
     }
   }, [open]);
 
@@ -1041,18 +1045,18 @@ export function FlowRunDialog({
       }}
     >
       <DialogContent className="w-[95vw] max-w-[95vw] overflow-hidden">
-        <DialogHeader className="pb-2.5 pt-3">
-          <DialogTitle className="flex items-center gap-2">
-            <Play className="size-4 text-accent" />
+        <DialogHeader className="shrink-0 gap-0.5 pb-2 pt-2.5 pr-14">
+          <DialogTitle className="flex items-center gap-1.5 text-[14px]">
+            <Play className="size-3.5 text-accent" />
             运行流程 · {flow.name}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="truncate text-[11px] leading-4">
             按画布顺序执行操作记录与取值节点；取值节点产出的环境变量会注入下一条记录的筛选值。
           </DialogDescription>
         </DialogHeader>
 
         <DialogBody className="min-h-0 flex-1 overflow-hidden p-0">
-          <div className="flex h-[calc(100vh-152px)] min-h-[460px] flex-col lg:flex-row">
+          <div className="relative flex h-[calc(100vh-136px)] min-h-[460px] flex-col lg:flex-row">
             <div className="relative min-h-[320px] flex-1 bg-white">
               <iframe
                 ref={frameRef}
@@ -1077,9 +1081,26 @@ export function FlowRunDialog({
                   {frameUrl}
                 </div>
               ) : null}
+              {!panelOpen ? (
+                <button
+                  type="button"
+                  onClick={() => setPanelOpen(true)}
+                  className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded-lg border border-line bg-white/95 px-2 py-1 text-[11px] font-medium text-muted shadow-sm transition-colors hover:border-accent/40 hover:text-accent lg:hidden"
+                  title="展开运行状态栏"
+                  aria-label="展开运行状态栏"
+                >
+                  <PanelRightOpen className="size-3.5" />
+                  运行状态
+                </button>
+              ) : null}
             </div>
 
-            <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto overflow-x-hidden border-t border-line bg-paper/70 p-3 lg:min-h-0 lg:w-[460px] lg:border-l lg:border-t-0">
+            <aside
+              className={cn(
+                "w-full shrink-0 flex-col gap-3 overflow-y-auto overflow-x-hidden border-t border-line bg-paper/70 p-3 lg:min-h-0 lg:border-l lg:border-t-0",
+                panelOpen ? "flex lg:w-[460px]" : "hidden",
+              )}
+            >
               <RunStatusOverview
                 phaseLabel={PHASE_LABEL[phase]}
                 phaseVariant={phaseVariant}
@@ -1088,6 +1109,7 @@ export function FlowRunDialog({
                 vars={vars}
                 filter={stepFilter}
                 onFilterChange={setStepFilter}
+                onCollapse={() => setPanelOpen(false)}
               />
 
               {phase === "intervening" && failure ? (
@@ -1249,6 +1271,24 @@ export function FlowRunDialog({
                 </div>
               ) : null}
             </aside>
+
+            <button
+              type="button"
+              onClick={() => setPanelOpen((current) => !current)}
+              className={cn(
+                "absolute top-9 z-20 hidden size-6 -translate-y-1/2 place-items-center rounded-full border border-line bg-white text-muted shadow-sm transition-colors hover:border-accent/40 hover:text-accent lg:grid",
+                panelOpen ? "right-[460px] translate-x-1/2" : "right-1",
+              )}
+              title={panelOpen ? "收起运行状态栏" : "展开运行状态栏"}
+              aria-label={panelOpen ? "收起运行状态栏" : "展开运行状态栏"}
+              aria-expanded={panelOpen}
+            >
+              {panelOpen ? (
+                <PanelRightClose className="size-3.5" />
+              ) : (
+                <PanelRightOpen className="size-3.5" />
+              )}
+            </button>
           </div>
         </DialogBody>
 
@@ -1364,6 +1404,7 @@ function RunStatusOverview({
   vars,
   filter,
   onFilterChange,
+  onCollapse,
 }: {
   phaseLabel: string;
   phaseVariant: BadgeVariant;
@@ -1372,6 +1413,7 @@ function RunStatusOverview({
   vars: Record<string, unknown>;
   filter: "all" | "tunable";
   onFilterChange: (filter: "all" | "tunable") => void;
+  onCollapse: () => void;
 }) {
   const varEntries = Object.entries(vars);
   return (
@@ -1381,11 +1423,23 @@ function RunStatusOverview({
           <Activity className="size-3.5 text-accent" />
           运行状态
         </span>
-        <StepFilter
-          filter={filter}
-          tunableCount={summary.tunable}
-          onChange={onFilterChange}
-        />
+        <div className="flex items-center gap-1">
+          <StepFilter
+            filter={filter}
+            tunableCount={summary.tunable}
+            onChange={onFilterChange}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="size-6 shrink-0 p-0 lg:hidden"
+            title="收起运行状态栏"
+            aria-label="收起运行状态栏"
+            onClick={onCollapse}
+          >
+            <PanelRightClose className="size-3.5" />
+          </Button>
+        </div>
       </div>
 
       <div className="mt-3 flex items-end justify-between gap-3">
