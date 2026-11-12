@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   Crosshair,
+  ListOrdered,
   Loader2,
   MonitorDot,
   RefreshCw,
@@ -447,7 +448,10 @@ const ExtractRecorderDialog = ({
                 <aside className="flex w-full shrink-0 flex-col border-t border-line bg-paper/70 p-2 lg:w-[280px] lg:border-l lg:border-t-0">
                   <Card className="min-h-0 flex-1 gap-0 p-0">
                     <div className="flex items-center justify-between border-b border-line px-3 py-2">
-                      <span className="text-[11.5px] font-medium">录制步骤</span>
+                      <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
+                        <ListOrdered className="size-3.5 text-accent" />
+                        录制步骤
+                      </h3>
                       <Badge variant="secondary">{steps.length}</Badge>
                     </div>
                     <ol className="grid min-h-0 flex-1 content-start gap-1.5 overflow-y-auto p-2">

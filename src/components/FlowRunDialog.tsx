@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
+  Braces,
   Check,
+  CircleDashed,
   CirclePause,
   FileJson,
+  FileText,
   ListOrdered,
   Pause,
   Play,
@@ -110,11 +113,15 @@ interface PickerDraft {
   on: "item" | "row";
 }
 
+type GroupKind = "record" | "extract" | "solo";
+
 interface RunStep {
   microId: string;
   node: FlowNode;
   groupId?: string;
   groupLabel: string;
+  /** 分组对应的画布节点类型，供分组头显示。 */
+  groupKind: GroupKind;
   /** 全局执行序号（1 基），与运行日志同序。 */
   index: number;
   tunable: "interact" | "picker" | "extract" | null;
@@ -453,17 +460,20 @@ export function FlowRunDialog({
     return node && node.kind === "record" ? recordMap.get(node.recordId) : undefined;
   }, [flow.graph, recordMap]);
 
-  const groupLabels = useMemo(() => {
-    const labels = new Map<string, string>();
+  const groupMeta = useMemo(() => {
+    const meta = new Map<string, { label: string; kind: GroupKind }>();
     for (const node of flow.graph?.nodes ?? []) {
       if (node.kind === "record") {
-        labels.set(node.id, recordMap.get(node.recordId)?.name ?? "记录已删除");
+        meta.set(node.id, {
+          label: recordMap.get(node.recordId)?.name ?? "记录已删除",
+          kind: "record",
+        });
       } else {
         const name = effectiveExtractName(flow.graph, node.id, node.varName);
-        labels.set(node.id, `取值 ${name || "未命名"}`);
+        meta.set(node.id, { label: `取值 ${name || "未命名"}`, kind: "extract" });
       }
     }
-    return labels;
+    return meta;
   }, [flow.graph, recordMap]);
 
   // 与运行引擎同构：从 entry 沿第一条出边走到底，显示顺序即执行顺序。
@@ -485,18 +495,20 @@ export function FlowRunDialog({
       seen.add(current);
       const groupId =
         typeof node.meta?.flowNodeId === "string" ? node.meta.flowNodeId : undefined;
+      const meta = groupId ? groupMeta.get(groupId) : undefined;
       steps.push({
         microId: node.id,
         node,
         groupId,
-        groupLabel: groupId ? (groupLabels.get(groupId) ?? groupId) : "独立步骤",
+        groupLabel: groupId ? (meta?.label ?? groupId) : "独立步骤",
+        groupKind: meta?.kind ?? "solo",
         index: steps.length + 1,
         tunable: tunableKindOf(node),
       });
       current = nextById.get(current);
     }
     return steps;
-  }, [compiledState.value, groupLabels]);
+  }, [compiledState.value, groupMeta]);
 
   const unreachableCount = Math.max(
     0,
@@ -1469,14 +1481,15 @@ function RunStepsPanel({
   onExtractChange,
   registerRef,
 }: RunStepsPanelProps) {
-  const visibleSteps = filter === "tunable" ? steps.filter((step) => step.tunable) : steps;
+  // 按相邻 groupId 切组：一组就是一个画布节点，整组步骤用于聚合状态。
   const groups: Array<{
     key: string;
     groupId?: string;
     label: string;
+    kind: GroupKind;
     steps: RunStep[];
   }> = [];
-  for (const step of visibleSteps) {
+  for (const step of steps) {
     const last = groups[groups.length - 1];
     if (last && last.groupId === step.groupId) last.steps.push(step);
     else
@@ -1484,16 +1497,17 @@ function RunStepsPanel({
         key: `${step.groupId ?? "solo"}-${groups.length}`,
         groupId: step.groupId,
         label: step.groupLabel,
+        kind: step.groupKind,
         steps: [step],
       });
   }
-  const groupTotals = new Map<string, RunStep[]>();
-  for (const step of steps) {
-    const key = step.groupId ?? "__none__";
-    const list = groupTotals.get(key) ?? [];
-    list.push(step);
-    groupTotals.set(key, list);
-  }
+  const shownGroups = groups
+    .map((group, index) => ({
+      ...group,
+      ordinal: index + 1,
+      visibleSteps: group.steps.filter((step) => filter === "all" || step.tunable),
+    }))
+    .filter((group) => group.visibleSteps.length > 0);
 
   return (
     <Card className="min-h-[220px] min-w-0 flex-1">
@@ -1505,21 +1519,26 @@ function RunStepsPanel({
         <span className="text-[10.5px] text-muted">按执行顺序 · 同组共享容器</span>
       </div>
 
-      {visibleSteps.length === 0 ? (
+      {shownGroups.length === 0 ? (
         <p className="py-6 text-center text-[11.5px] leading-5 text-muted">
           {steps.length === 0 ? "画布没有可执行的节点。" : "没有可微调的节点。"}
         </p>
       ) : (
         <div className="mt-3 grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] content-start gap-3 overflow-y-auto overflow-x-hidden pr-1">
-          {groups.map((group) => (
-            <div key={group.key} className="min-w-0">
+          {shownGroups.map((group) => (
+            <section
+              key={group.key}
+              className="min-w-0 rounded-xl bg-paper p-3"
+            >
               <RunGroupHeader
                 label={group.label}
-                steps={groupTotals.get(group.groupId ?? "__none__") ?? group.steps}
+                ordinal={group.ordinal}
+                kind={group.kind}
+                steps={group.steps}
                 itemMap={itemMap}
               />
-              <ol className="mt-2 grid grid-cols-[minmax(0,1fr)] gap-1.5">
-                {group.steps.map((step) => (
+              <ol className="mt-2 grid grid-cols-[minmax(0,1fr)] gap-2">
+                {group.visibleSteps.map((step) => (
                   <RunStepCard
                     key={step.microId}
                     step={step}
@@ -1540,7 +1559,7 @@ function RunStepsPanel({
                   />
                 ))}
               </ol>
-            </div>
+            </section>
           ))}
         </div>
       )}
@@ -1548,12 +1567,22 @@ function RunStepsPanel({
   );
 }
 
+const GROUP_KIND_LABEL: Record<GroupKind, string> = {
+  record: "操作记录",
+  extract: "取值节点",
+  solo: "独立步骤",
+};
+
 function RunGroupHeader({
   label,
+  ordinal,
+  kind,
   steps,
   itemMap,
 }: {
   label: string;
+  ordinal: number;
+  kind: GroupKind;
   steps: RunStep[];
   itemMap: Map<string, RunItem>;
 }) {
@@ -1578,9 +1607,19 @@ function RunGroupHeader({
       : total > 0 && done === total
         ? "已执行"
         : `${done} / ${total} 完成`;
+  const KindIcon =
+    kind === "record" ? FileText : kind === "extract" ? Braces : CircleDashed;
   return (
-    <div className="flex items-center justify-between gap-2 px-0.5">
-      <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold text-muted">
+    <div className="flex items-center gap-2">
+      <span className="shrink-0 rounded-md bg-panel px-1.5 py-0.5 font-mono text-[9.5px] font-semibold text-muted shadow-[0_1px_2px_rgba(44,38,32,0.06)]">
+        节点 {String(ordinal).padStart(2, "0")}
+      </span>
+      <KindIcon
+        className="size-3.5 shrink-0 text-accent"
+        role="img"
+        aria-label={GROUP_KIND_LABEL[kind]}
+      />
+      <span className="min-w-0 flex-1 break-words text-[12px] font-semibold leading-4 text-ink">
         {label}
       </span>
       <span className={cn("shrink-0 font-mono text-[10px]", tone)}>{text}</span>
@@ -1652,13 +1691,13 @@ function RunStepCard({
     <li
       ref={(element) => registerRef(microId, element)}
       className={cn(
-        "min-w-0 rounded-lg border px-2.5 py-2 transition-colors",
-        // 状态边框直接沿用外框，避免和默认边框叠成双层描边。
+        "min-w-0 rounded-[10px] border px-2.5 py-2 transition-colors",
+        // bento 插片：默认无边框，白纸微阴影浮于纸色分组上，与运行状态同语言；仅执行中/失败用描边强调。
         active
           ? status === "fail"
-            ? "border-danger/35"
-            : "border-running/35"
-          : "border-line",
+            ? "border-danger/40"
+            : "border-running/40"
+          : "border-transparent shadow-[0_1px_2px_rgba(44,38,32,0.06)]",
         tone.row,
         status === "skipped" && "opacity-70",
         blocked && "opacity-60",

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Play, RotateCcw, Square, TriangleAlert, Video, X } from "lucide-react";
+import { ListOrdered, Loader2, Play, RotateCcw, Square, TriangleAlert, Video, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -465,9 +465,10 @@ export function RecordReplayDialog({
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
-                      STEPS · 执行步骤
-                    </span>
+                    <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
+                      <ListOrdered className="size-3.5 text-accent" />
+                      执行步骤
+                    </h3>
                     <Badge variant="secondary">{dsl?.nodes.length ?? 0}</Badge>
                   </div>
 
