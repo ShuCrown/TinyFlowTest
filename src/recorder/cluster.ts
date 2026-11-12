@@ -176,6 +176,11 @@ function readSemanticCluster(steps: ChromeRecorderStep[], start: number): Found 
 
   if (picks.length === 0) return null;
 
+  // 点击展开的触发器上，鼠标移入会先记一次 hover；它不是打开动作。
+  // 把紧挨着的同目标 hover 折进簇里，回放不再多一次无效悬停。
+  const hoverPrecursor = hoverPrecursorIndex(steps, start);
+  if (hoverPrecursor !== null) indices.unshift(hoverPrecursor);
+
   const detection: Detection = overlayStart ? "heuristic" : semantic!.detection ?? "class";
   const warnings: string[] = [];
   const needsConfirm = overlayStart || detection === "heuristic";
@@ -200,6 +205,25 @@ function readSemanticCluster(steps: ChromeRecorderStep[], start: number): Found 
     },
     end,
   };
+}
+
+/**
+ * 紧挨在触发器点击之前的 hover 是否是同一目标。
+ *
+ * antd Dropdown 的 trigger 可配 hover 或 click：配 click 时鼠标移入仍会先触发 hover，
+ * 但面板此时没开（popupOpen=false），真正的打开动作是随后的 click。
+ * 只有「点击前面板未展开 + 同规则同目标」才折叠，避免误删 hover 展开的菜单。
+ */
+function hoverPrecursorIndex(steps: ChromeRecorderStep[], start: number): number | null {
+  if (start === 0) return null;
+  const hover = steps[start - 1];
+  const trigger = steps[start];
+  if (!hover || !trigger) return null;
+  if (hover.type !== "hover" || trigger.type !== "click") return null;
+  if (hover.semantic?.zone !== "trigger" || trigger.semantic?.zone !== "trigger") return null;
+  if ((hover.semantic.rule ?? null) !== (trigger.semantic?.rule ?? null)) return null;
+  if (trigger.semantic?.popupOpen !== false) return null;
+  return sameTarget(hover, trigger) ? start - 1 : null;
 }
 
 /**

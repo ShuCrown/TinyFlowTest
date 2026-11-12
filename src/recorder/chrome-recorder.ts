@@ -663,7 +663,9 @@ function pickerNodeFromCluster(
     system: system.id,
     mode: cluster.mode,
     trigger,
-    triggerAction: rule?.triggerAction ?? "click",
+    // 打开方式以录制时真正发生的事件为准：antd Dropdown 的 trigger 可能是 click 也可能是 hover，
+    // 规则表只能给默认值，套用错就会对着 click 展开的组件发 hover，面板永远不出现。
+    triggerAction: cluster.trigger.step.type === "hover" ? "hover" : "click",
     panel: {
       scope: {
         type: cluster.mode === "dialog" ? "dialog" : "dropdown",

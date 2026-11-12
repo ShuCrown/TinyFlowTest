@@ -163,7 +163,14 @@ function cellSummaryLabel(cell: CellRef): string {
 
 function nodeLabel(node: FlowNode): string {
   if (node.type === "navigate") return node.url;
-  if (node.type === "picker") return node.name ?? node.trigger.label ?? "复合选择";
+  if (node.type === "picker") {
+    const base = node.name ?? node.trigger.label ?? "复合选择";
+    // 选择值在 picker 节点内部（回放也用它）；标题不带出来时，用户会以为选项点击没被转换。
+    const picks = (node.pick.values ?? [])
+      .map((item) => item.value ?? "")
+      .filter(Boolean);
+    return picks.length > 0 ? `${base} · ${picks.join(" / ")}` : base;
+  }
   if (node.type === "interact") return node.name ?? node.target.label ?? node.adapter;
   return node.name ?? node.id;
 }

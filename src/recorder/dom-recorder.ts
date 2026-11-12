@@ -817,16 +817,29 @@ function isCellEditor(element: Element): boolean {
  * - 面板内的可见项 / 表格行：即使标签不在 ACTIONABLE 列表里也要记（td、li、div）；
  * - 普通可点元素：沿用原规则，输入框交给 change；
  * - 触发器：点击目标常是覆盖在容器上的搜索 input（可能 opacity: 0），
- *   必须记录一次打开动作，否则后续选项永远不出现。
+ *   必须记录一次打开动作，否则后续选项永远不出现；
+ * - 其余落点全量记录（页面根节点与纯输入控件除外），
+ *   避免自定义 div / span / 图标这类没有语义标签的操作被静默丢弃。
  */
-function clickTargetFor(raw: Element, match: RuleMatch | null): Element | null {
+export function clickTargetFor(raw: Element, match: RuleMatch | null): Element | null {
   if (match && (match.zone === "item" || match.zone === "row")) return match.element;
 
   const actionable = raw.closest(ACTIONABLE_SELECTOR);
   if (actionable && !actionable.closest("svg") && !isPlainField(actionable)) return actionable;
 
   if (match?.zone === "trigger") return controlFor(match.element);
-  return null;
+  return fallbackClickTarget(raw);
+}
+
+/**
+ * 全量兜底：页面空白（body / html）不记，纯输入控件的意图由 change 步骤表达；
+ * 其余落点按实际被点的元素记录，自定义 div 的文本或结构路径仍能定位回放。
+ */
+function fallbackClickTarget(raw: Element): Element | null {
+  const doc = raw.ownerDocument;
+  if (raw === doc.body || raw === doc.documentElement) return null;
+  if (isPlainField(raw)) return null;
+  return raw;
 }
 
 /** 触发器里真正接收事件的控件：优先带稳定 id/name 的输入，其次可见输入，最后才是容器。 */
