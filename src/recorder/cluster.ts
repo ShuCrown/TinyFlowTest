@@ -123,6 +123,14 @@ function readSemanticCluster(steps: ChromeRecorderStep[], start: number): Found 
       // 同一个触发器再点一次 = 第二次打开，新簇从这里开始。
       if (step.type === "click" && next.popupOpen === false) break;
       if (!overlayStart && next.rule !== rule) break;
+      // 面板已经开着时补发的同目标悬停不是动作：点击式 dropdown 点开后组件重渲染会在
+      // 静止的鼠标下再派发一次 mouseover。让它收簇会把真正开面板的 click 挤成独立节点，
+      // picker 改以这次悬停为触发器；回放虽然会回退手势，但白白多一轮超时等待。
+      if (step.type === "hover" && next.popupOpen === true && sameTarget(step, trigger)) {
+        indices.push(j);
+        end = j + 1;
+        continue;
+      }
       if (step.type === "change") {
         // 还没选过值时的面板内输入 = 搜索筛选；
         // 已经选过值后的触发器 change = 组件回写选中值，吸收掉（哪怕面板还没关）。

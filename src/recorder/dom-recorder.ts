@@ -394,6 +394,12 @@ export class DomRecorder {
     // 但它们的意图是 click，记下来只会在 picker 前多一个无意义的悬停节点。
     if (match && match.rule.triggerAction !== "hover") return;
     const semantic = match ? buildSemantic(trigger, match) : undefined;
+    // 面板已展开时，停在触发器上的 mouseover 不是「打开」动作：点击式 dropdown 点开后
+    // 组件重渲染会在静止的鼠标下再派发一次 mouseover，记下来就多一条 popupOpen=true 的
+    // 悬停，转换时它会挤掉 click 成为 picker 触发器（回放只发悬停，面板永远打不开）。
+    // 只限 trigger 区：面板内子菜单的悬停是真实动作，且 buildSemantic 给非 trigger 区
+    // 恒为 popupOpen=true，不能一概跳过。
+    if (match?.zone === "trigger" && semantic?.popupOpen === true) return;
     this.record(
       {
         type: "hover",

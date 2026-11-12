@@ -36,6 +36,7 @@ import {
   pickScopes,
   waitForPanel,
   waitForPanelClosed,
+  type PanelResolution,
 } from "./panel.ts";
 import {
   ReplayError,
@@ -105,6 +106,12 @@ const POLL_MS = 100;
  * 只用于交互节点的最小兜底；超时不判失败，后续节点会等自己的目标可见。
  */
 const PANEL_OPEN_TIMEOUT_MS = 1500;
+
+/**
+ * 开面板手势落空后换另一种手势前的等待。
+ * 必须大于组件的悬停延迟（antd 默认 0.1s）与展开动画，否则会把正在展开的面板点关。
+ */
+const PANEL_GESTURE_RETRY_MS = 1200;
 
 /**
  * 最小回放器：沿 DSL 边顺序执行 navigate / interact / wait。
@@ -945,35 +952,84 @@ async function executePicker(
     multiClose: node.stageTimeouts?.closeMs ?? 1200,
   };
 
-  const trigger = await waitForTarget(host, node.trigger, timeoutMs, {
+  const triggerOptions: ResolveOptions = {
     requireVisible: true,
     allowMultiple: false,
     allowHiddenSelectInput: true,
     signal: context.signal,
     exclude: (element) => Boolean(element.closest(FOREIGN_PANEL)),
-  });
-  const control = resolveSelectTrigger(trigger.element) ?? trigger.element;
+  };
+  const trigger = await waitForTarget(host, node.trigger, timeoutMs, triggerOptions);
+  let control = resolveSelectTrigger(trigger.element) ?? trigger.element;
 
-  // open 幂等：inline 已展开就不再点（否则会 toggle 关掉）；dialog 每次都要点触发器。
-  if (node.mode === "dialog" || !isPanelOpen(control, selector)) {
-    if (node.triggerAction === "hover") {
+  /**
+   * 录制本身判定不了是哪个手势开的面板：antd 悬停触发有 0.1s 延迟，
+   * hover→click 连击时两条事件落盘的 popupOpen 都是 false，两种配置产出同样的字节。
+   * 所以按记录的手势先试，落空就换另一种，而不是对着打不开的面板等满超时。
+   */
+  const gestures: Array<"hover" | "click"> =
+    node.mode === "dialog"
+      ? ["click"]
+      : node.triggerAction === "hover"
+        ? ["hover", "click"]
+        : ["click", "hover"];
+  /** 每种手势最多试两次；dialog 的触发器是业务按钮，重复点会重复提交，只点一次。 */
+  const maxRounds = node.mode === "dialog" ? 1 : gestures.length * 2;
+  let openGesture = gestures[0]!;
+  const dispatchOpen = async (gesture: "hover" | "click"): Promise<void> => {
+    if (gesture === "hover") {
       hoverElement(control);
       await sleep(80, context.signal);
     } else {
       clickElement(control);
     }
     context.progress.dispatched = true;
-  }
+  };
 
-  // 录制时的 popupId 会被重新挂载后的组件复用：每轮以触发器当前的 aria-controls 为准。
-  const resolution = await waitForPanel(
-    doc,
-    node,
-    selector,
-    stage.open,
-    () => ariaControlsOf(control),
-    context.signal,
+  const openDeadline = Date.now() + stage.open;
+  /** 每种手势分到的等待；小预算也要保证另一种手势轮得到，不被第一种吃光。 */
+  const gestureBudget = Math.max(
+    1,
+    Math.min(PANEL_GESTURE_RETRY_MS, Math.floor(stage.open / gestures.length)),
   );
+  let resolution: PanelResolution | null = null;
+  for (let round = 0; round < maxRounds; round += 1) {
+    if (Date.now() >= openDeadline) break;
+    // open 幂等：inline 已展开就不再动触发器（否则会 toggle 关掉）；dialog 每次都要点。
+    if (node.mode === "dialog" || !isPanelOpen(control, selector)) {
+      openGesture = gestures[round % gestures.length]!;
+      await dispatchOpen(openGesture);
+    }
+    // 录制时的 popupId 会被重新挂载后的组件复用：每轮以触发器当前的 aria-controls 为准。
+    resolution = await waitForPanel(
+      doc,
+      node,
+      selector,
+      Math.min(gestureBudget, Math.max(0, openDeadline - Date.now())),
+      () => ariaControlsOf(control),
+      context.signal,
+    );
+    if (resolution || Date.now() >= openDeadline) break;
+    // 触发器可能已被重挂载：旧引用脱离文档后，对着它发手势永远没效果。
+    const refreshed = await waitForTarget(
+      host,
+      node.trigger,
+      openDeadline - Date.now(),
+      triggerOptions,
+    );
+    control = resolveSelectTrigger(refreshed.element) ?? refreshed.element;
+  }
+  // 手势试遍仍没开：剩余预算只留给异步渲染，不再重复触发。
+  if (!resolution && Date.now() < openDeadline) {
+    resolution = await waitForPanel(
+      doc,
+      node,
+      selector,
+      openDeadline - Date.now(),
+      () => ariaControlsOf(control),
+      context.signal,
+    );
+  }
   if (!resolution) {
     throw new ReplayError(
       `面板未在 ${stage.open}ms 内打开: ${label}（面板选择器 ${selector ?? "缺失"}）`,
@@ -989,7 +1045,8 @@ async function executePicker(
   const reopenPanel = async (): Promise<Element | null> => {
     if (node.mode !== "inline" || reopenCount >= 3) return null;
     reopenCount += 1;
-    clickElement(control);
+    // 用真正打开过面板的那个手势重开：对悬停展开的组件补一次点击是打不开的。
+    await dispatchOpen(openGesture);
     const next = await waitForPanel(
       doc,
       node,
