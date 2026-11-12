@@ -48,6 +48,7 @@ import { NodeTuningDialog } from "@/components/NodeTuningDialog";
 import { cn } from "@/lib/utils";
 import { getRecord, getSystemToken, listSystems, saveRecord, saveSystemToken } from "@/lib/store";
 import {
+  activateProxyTarget,
   describeTargetFailure,
   loadProxyConfig,
   resolveTargetUrl,
@@ -569,6 +570,9 @@ export function RecordWorkbenchPage() {
     const resolved = resolveTargetUrl(targetUrl, config);
     if (!resolved) {
       throw new Error(describeTargetFailure(config, proxyError));
+    }
+    if (resolved.viaProxy && resolved.targetUrl) {
+      await activateProxyTarget(resolved.targetUrl);
     }
     let doc = await loadFrame(resolved.url.toString());
     if (resolved.viaProxy && token.trim()) {

@@ -169,7 +169,7 @@ function RecordDialog({
               hint={
                 <>
                   可使用同源路径（如 <span className="font-mono">/tf/demo/customers.html</span>）
-                  直接录制；跨域系统需与开发期代理目标一致。
+                  直接录制；跨域系统会经开发期代理转发，同一标签页以最后一次打开的系统为准。
                 </>
               }
             >

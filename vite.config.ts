@@ -8,6 +8,39 @@ import tailwindcss from "@tailwindcss/vite";
 const APP_BASE = "/tf/";
 const TARGET_URL = process.env.TINYFLOWTEST_TARGET_URL ?? "http://dev.lthbzw.com:30105";
 const target = new URL(TARGET_URL);
+/** 运行期切换代理目标：录制任意系统时先 POST 目标 origin，后续根路径请求按 cookie 转发。 */
+const TARGET_ENDPOINT = "/__tinyflowtest/target";
+const TARGET_COOKIE = "tinyflowtest_target";
+const MAX_TARGET_BODY = 4096;
+
+function parseTarget(raw: unknown): URL | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
+    return new URL(url.origin);
+  } catch {
+    return null;
+  }
+}
+
+function readTargetCookie(header: string | undefined): URL | null {
+  if (!header) return null;
+  for (const chunk of header.split(";")) {
+    const index = chunk.indexOf("=");
+    if (index < 0) continue;
+    if (chunk.slice(0, index).trim() !== TARGET_COOKIE) continue;
+    try {
+      return parseTarget(
+        Buffer.from(chunk.slice(index + 1).trim(), "base64url").toString("utf8"),
+      );
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 /**
  * 把目标系统的重定向拉回同源代理。
@@ -44,6 +77,52 @@ function targetProxy(): Plugin {
       res.end();
       return;
     }
+    if (url === TARGET_ENDPOINT) {
+      // 自定义请求头迫使跨站请求走预检；开发期代理不接受网页表单/图片这类简单请求切换目标。
+      if (req.headers["x-tinyflowtest"] !== "1") {
+        res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "缺少 x-tinyflowtest 请求头" }));
+        return;
+      }
+      if (req.method !== "POST") {
+        res.writeHead(405, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "仅支持 POST" }));
+        return;
+      }
+      let body = "";
+      let tooLarge = false;
+      req.setEncoding("utf8");
+      req.on("data", (chunk: string) => {
+        if (tooLarge) return;
+        body += chunk;
+        if (body.length > MAX_TARGET_BODY) tooLarge = true;
+      });
+      req.on("end", () => {
+        if (tooLarge) {
+          res.writeHead(413, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ error: "请求体过大" }));
+          return;
+        }
+        let next: URL | null = null;
+        try {
+          next = parseTarget((JSON.parse(body) as { targetUrl?: unknown }).targetUrl);
+        } catch {
+          next = null;
+        }
+        if (!next) {
+          res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ error: "targetUrl 需要是 http(s) 网址" }));
+          return;
+        }
+        res.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+          "set-cookie": `${TARGET_COOKIE}=${Buffer.from(next.origin).toString("base64url")}; Path=/; SameSite=Lax`,
+        });
+        res.end(JSON.stringify({ targetUrl: next.origin }));
+      });
+      return;
+    }
     if (url === "/__tinyflowtest/config") {
       res.writeHead(200, {
         "content-type": "application/json; charset=utf-8",
@@ -66,19 +145,20 @@ function targetProxy(): Plugin {
       return;
     }
 
-    const client = target.protocol === "https:" ? https : http;
+    const active = readTargetCookie(req.headers.cookie) ?? target;
+    const client = active.protocol === "https:" ? https : http;
     const proxyReq = client.request(
       {
-        protocol: target.protocol,
-        hostname: target.hostname,
-        port: target.port || undefined,
+        protocol: active.protocol,
+        hostname: active.hostname,
+        port: active.port || undefined,
         path: url,
         method: req.method,
         headers: {
           ...req.headers,
-          host: target.host,
-          origin: target.origin,
-          referer: `${target.origin}/`,
+          host: active.host,
+          origin: active.origin,
+          referer: `${active.origin}/`,
         },
       },
       (proxyRes) => {
@@ -90,7 +170,7 @@ function targetProxy(): Plugin {
           );
         }
         if (headers.location) {
-          headers.location = rewriteLocation(String(headers.location), target);
+          headers.location = rewriteLocation(String(headers.location), active);
         }
         // 同源代理是开发期能力：去掉禁止 iframe 的头，避免目标系统拒绝被嵌入。
         delete headers["x-frame-options"];

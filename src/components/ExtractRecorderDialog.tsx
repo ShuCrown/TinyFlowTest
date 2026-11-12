@@ -34,6 +34,7 @@ import { Field } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { getSystemToken } from "@/lib/store";
 import {
+  activateProxyTarget,
   describeTargetFailure,
   loadProxyConfig,
   resolveTargetUrl,
@@ -213,6 +214,9 @@ const ExtractRecorderDialog = ({
       setProxyConfig(config);
       const resolved = resolveTargetUrl(targetUrl || system.baseUrl, config);
       if (!resolved) throw new Error(describeTargetFailure(config, ""));
+      if (resolved.viaProxy && resolved.targetUrl) {
+        await activateProxyTarget(resolved.targetUrl);
+      }
       frame.src = "about:blank";
       await new Promise((resolve) => window.setTimeout(resolve, 30));
       let doc = await loadFrame(frame, resolved.url.toString());

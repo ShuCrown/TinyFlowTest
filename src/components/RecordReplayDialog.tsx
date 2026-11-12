@@ -16,6 +16,7 @@ import {
 import type { ExtractNode, FlowDsl, FlowNode, ValueLike } from "@/dsl/index.ts";
 import { getSystemToken } from "@/lib/store";
 import {
+  activateProxyTarget,
   describeTargetFailure,
   loadProxyConfig,
   resolveTargetUrl,
@@ -280,6 +281,9 @@ export function RecordReplayDialog({
       if (controller.signal.aborted) return;
       const resolved = resolveTargetUrl(record.targetUrl, config);
       if (!resolved) throw new Error(describeTargetFailure(config, ""));
+      if (resolved.viaProxy && resolved.targetUrl) {
+        await activateProxyTarget(resolved.targetUrl);
+      }
 
       let doc = await loadFrame(frame, resolved.url.toString());
       if (controller.signal.aborted) return;

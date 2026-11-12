@@ -46,6 +46,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getSystemToken, saveSystemToken } from "@/lib/store";
 import {
+  activateProxyTarget,
   describeTargetFailure,
   loadProxyConfig,
   resolveTargetUrl,
@@ -829,6 +830,9 @@ export function FlowRunDialog({
       if (firstRecord) {
         const resolved = resolveTargetUrl(firstRecord.targetUrl, config);
         if (!resolved) throw new Error(describeTargetFailure(config, ""));
+        if (resolved.viaProxy && resolved.targetUrl) {
+          await activateProxyTarget(resolved.targetUrl);
+        }
 
         let doc = await loadFrame(frame, resolved.url.toString());
         const token = firstRecord.systemId ? getSystemToken(firstRecord.systemId) : "";

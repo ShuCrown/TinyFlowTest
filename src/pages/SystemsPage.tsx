@@ -101,7 +101,7 @@ function SystemDialog({
             {system ? "编辑系统" : "新增系统"}
           </DialogTitle>
           <DialogDescription>
-            系统地址会在录制与回放时作为同源代理目标使用；登录令牌可选，只保存在当前标签页。
+            系统地址会在录制与回放时经开发期代理加载，可填写任意 http(s) 系统；登录令牌可选，只保存在当前标签页。
           </DialogDescription>
         </DialogHeader>
 
