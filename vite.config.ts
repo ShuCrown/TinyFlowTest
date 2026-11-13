@@ -42,6 +42,19 @@ function readTargetCookie(header: string | undefined): URL | null {
   return null;
 }
 
+/** 请求是否来自本应用页面（同 host 且路径在 /tf/ 下）。 */
+function isAppReferer(req: http.IncomingMessage): boolean {
+  const referer = req.headers.referer;
+  const host = req.headers.host;
+  if (!referer || !host) return false;
+  try {
+    const url = new URL(referer);
+    return url.host === host && url.pathname.startsWith(APP_BASE);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 把目标系统的重定向拉回同源代理。
  *
@@ -72,7 +85,16 @@ function targetProxy(): Plugin {
       next();
       return;
     }
-    if ((url === "/" || url === "") && req.headers["sec-fetch-dest"] !== "iframe") {
+    // 根路径是目标系统的入口：只有「用户直接打开站点 /」才跳去应用。
+    // 录制 iframe 可能不发 Sec-Fetch-Dest，此时用 referer（应用页）或已切换的目标 cookie 判定。
+    const fromAppPage = isAppReferer(req);
+    const hasTarget = Boolean(readTargetCookie(req.headers.cookie));
+    if (
+      (url === "/" || url === "") &&
+      req.headers["sec-fetch-dest"] !== "iframe" &&
+      !fromAppPage &&
+      !hasTarget
+    ) {
       res.writeHead(302, { location: APP_BASE });
       res.end();
       return;
